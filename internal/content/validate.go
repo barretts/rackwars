@@ -18,12 +18,15 @@ func lookupIn(ids []MarketID, want MarketID) (MarketID, bool) {
 }
 
 type Rules struct {
-	Hosting     bool
-	Power       bool
-	Heat        bool
-	Encounters  bool
-	Leases      bool
-	Allocations bool
+	// The field names in a save file are explicit for the same reason the cast
+	// is named by stable ids: a ruleset that has been written down must keep its
+	// meaning when Go code is renamed.
+	Hosting     bool `json:"hosting"`
+	Power       bool `json:"power"`
+	Heat        bool `json:"heat"`
+	Encounters  bool `json:"encounters"`
+	Leases      bool `json:"leases"`
+	Allocations bool `json:"allocations"`
 }
 
 // PrototypeRules is the Phase 2-3 profile: freight, capacity, debt, price

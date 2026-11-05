@@ -333,6 +333,8 @@ func (m Model) helpBox() []string {
 		"t                 travel: opens the road list",
 		"1-9 in travel     pick that road without an arrow key",
 		"e or enter        face the morning: a confirmation first, then the day closes",
+		"x                 write this run's trace out for a bug report",
+		"S                 save and quit",
 		"esc               cancel the current box, nothing changes",
 		"?                 this help",
 		"q or ctrl+c       quit",
@@ -340,6 +342,7 @@ func (m Model) helpBox() []string {
 		m.chrome.Muted("Buying, selling, borrowing, and repaying never cost a day."),
 		m.chrome.Muted("Only a confirmed Travel or Stay advances the clock."),
 		m.chrome.Muted("Resizing the window never advances the clock either."),
+		m.chrome.Muted("Every accepted move is written to the save folder as it happens."),
 		"",
 		m.chrome.Muted("press any key to go back"),
 	}

@@ -11,10 +11,13 @@ import (
 // Config fixes the content set for a run. Seed, product cast, market map, and
 // rule switches together identify the ruleset a save or trace refers to.
 type Config struct {
-	Seed     uint64
-	Products []content.ProductID
-	Markets  []content.MarketID
-	Rules    content.Rules
+	// The JSON field names are explicit: a save file states the world it was
+	// dealt from in terms a player can read, and a Go field rename must not
+	// silently change what existing saves mean.
+	Seed     uint64              `json:"seed"`
+	Products []content.ProductID `json:"products"`
+	Markets  []content.MarketID  `json:"markets"`
+	Rules    content.Rules       `json:"rules"`
 }
 
 // DefaultPrototypeConfig is the Phase 2-3 configuration: three cards, three

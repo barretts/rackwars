@@ -8,6 +8,7 @@ import (
 
 	"rackwars/internal/content"
 	"rackwars/internal/game"
+	"rackwars/internal/save"
 )
 
 // Terminal size contract from the design document: 80x24 is the minimum
@@ -28,6 +29,10 @@ const (
 	modeTravel
 	modeConfirm
 	modeEnd
+	// modeContinue is the start-up list of saved runs. It is the only mode that
+	// exists before a run is on screen, and it answers to nothing but its own
+	// keys, so a stray Enter can never start or continue a run by accident.
+	modeContinue
 )
 
 type tradeAction int
@@ -103,6 +108,30 @@ type Model struct {
 
 	travelSel int
 
+	// Saving. store/runID identify where this run lives; actions is the history
+	// of every action the engine accepted this run, which is what a save replays
+	// to prove it is honest. lock is this instance's claim on the run, saveErr is
+	// the last autosave failure (empty when the board on screen is on disk), and
+	// quitNote is what the CLI prints after the screen is restored.
+	store    *save.Store
+	runID    string
+	lock     *save.Lock
+	actions  []game.Action
+	savedTo  string
+	saveErr  string
+	quitNote string
+	// restart is set when the player deliberately started a seed that already has
+	// a save; that write is allowed to move the run backwards, because the old run
+	// is the one being replaced, and the store keeps it in a .bak copy.
+	restart bool
+	// released records that this window gave up its claim, so a quit does not
+	// leave a marker behind.
+	released bool
+
+	// The continue list, shown at start-up when the save folder holds a run.
+	saves   []save.Entry
+	saveSel int
+
 	// dayLog holds the receipt lines from the most recent committed day: the
 	// wire that moved, the interest charged, freight paid, and any forced sale.
 	dayLog []string
@@ -143,7 +172,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
+			m.releaseSave()
 			return m, tea.Quit
+		}
+		// The continue list is a gate: until the player chooses, there is no run
+		// to draw and nothing to play.
+		if m.mode == modeContinue {
+			return m.handleContinueKey(msg)
 		}
 		// A finished run answers only to the ending screen's keys.
 		if m.over() {
@@ -185,6 +220,10 @@ func (m Model) startRun(seed uint64) (Model, error) {
 	if err != nil {
 		return m, err
 	}
+	if m.store != nil && m.seed != seed {
+		m.releaseSave()
+		m.runID = "seed-" + strconv.FormatUint(seed, 10)
+	}
 	m.run = run
 	m.seed = seed
 	m.mode = modeBoard
@@ -195,6 +234,16 @@ func (m Model) startRun(seed uint64) (Model, error) {
 	m.qtyDraft = ""
 	m.loanDraft = ""
 	m.travelSel = 0
+	// A new run starts with an empty history and a clean save slate. If the slot
+	// already holds a run for this seed, the player asked for this: the write that
+	// replaces it is allowed, and the store keeps what was there in a .bak copy.
+	m.actions = nil
+	m.saveErr = ""
+	m.savedTo = ""
+	m.saves = nil
+	if m.store != nil {
+		m.restart = true
+	}
 	return m, nil
 }
 

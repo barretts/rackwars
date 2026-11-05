@@ -12,7 +12,17 @@ import (
 func (m Model) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
+		// Quitting needs no extra write: every state change was saved as it
+		// happened. What quitting does owe the next window is giving up the claim
+		// on the run, so the save opens again without a stale marker.
+		m.releaseSave()
 		return m, tea.Quit
+	case "S":
+		// Save and quit. With a store attached this is also the retry key after a
+		// failed autosave.
+		return m.saveAndQuit()
+	case "x":
+		return m.exportTrace(), nil
 	case "?":
 		m.mode, m.status = modeHelp, ""
 		return m, nil
@@ -59,7 +69,11 @@ func (m Model) apply(a game.Action) Model {
 		return m
 	}
 	m.status, m.statusBad = receipt(a, rec), false
-	return m
+	// The engine accepted a complete state change, so this is a position worth
+	// putting on disk: record it in the run's history and autosave. A failed write
+	// reports itself and changes nothing else.
+	m = m.recordAction(a)
+	return m.writeSave()
 }
 
 // commitDay is the only path that moves time. It closes the box it came from
@@ -75,9 +89,15 @@ func (m Model) commitDay(a game.Action) Model {
 	}
 	m.dayLog = dayLines(closing, rec)
 	m.status, m.statusBad = receipt(a, rec), false
+	// A closed day is the strongest state boundary there is: the history is
+	// recorded and the board is put on disk before the next morning is drawn.
+	m = m.recordAction(a)
+	m = m.writeSave()
 	if m.over() {
 		m.mode = modeEnd
-		m.status = ""
+		if m.saveErr == "" {
+			m.status = ""
+		}
 	}
 	return m
 }
@@ -205,8 +225,9 @@ func (m Model) handleQtyKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.qtyAction == actionSell {
 			a.Kind = game.ActSell
 		}
+		before := len(m.actions)
 		m = m.apply(a)
-		if m.statusBad {
+		if len(m.actions) == before {
 			// The engine said no: keep the number on screen so the player can fix
 			// it, and put the reason inside the box, which covers the status line.
 			m.mode = modeQty
@@ -277,8 +298,9 @@ func (m Model) handleLenderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.loanAction == loanRepay {
 			a.Kind = game.ActRepay
 		}
+		before := len(m.actions)
 		m = m.apply(a)
-		if m.statusBad {
+		if len(m.actions) == before {
 			m.mode = modeLender
 			return m, nil
 		}
@@ -362,8 +384,71 @@ func (m Model) handleEndKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m = next
 		m.status = "Replaying seed " + itoa64(int64(m.seed)) + "."
 		return m, nil
+	case "x":
+		// The trace of a finished run is the bug report; the ending on screen is
+		// what the replay reproduces.
+		return m.exportTrace(), nil
 	case "q":
+		m.releaseSave()
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleContinueKey drives the start-up list of saved runs. Enter resumes the
+// highlighted run, n starts a fresh one, and q leaves without touching anything
+// on disk. A save that refuses to load stays refused: its reason is shown and the
+// player keeps the list, the other runs, and the new-run key.
+func (m Model) handleContinueKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.saveSel = wrap(m.saveSel-1, len(m.saves))
+		m.status, m.statusBad = "", false
+		return m, nil
+	case "down", "j":
+		m.saveSel = wrap(m.saveSel+1, len(m.saves))
+		m.status, m.statusBad = "", false
+		return m, nil
+	case "enter", "ctrl+m":
+		next, err := m.continueRun()
+		if err != nil {
+			m.status, m.statusBad = "That run cannot be opened: "+err.Error(), true
+			return m, nil
+		}
+		return next, nil
+	case "n":
+		// A new run is dealt on the seed this launch was asked for, which is the
+		// seed the continue list was offering by default.
+		next, err := m.startRun(m.seed)
+		if err != nil {
+			m.status, m.statusBad = "Cannot start a new run: "+err.Error(), true
+			return m, nil
+		}
+		next.status = "New run, seed " + itoa64(int64(next.seed)) + ". The saved runs are still on disk."
+		return next, nil
+	case "q":
+		m.releaseSave()
+		return m, tea.Quit
+	case "r":
+		// Recovery from the backup copy the store keeps beside every save. This is
+		// the answer to a damaged file, and on a healthy run it is simply the
+		// previous position of the same run.
+		next, err := m.recoverRun()
+		if err != nil {
+			m.status, m.statusBad = "Nothing to recover: "+err.Error(), true
+			return m, nil
+		}
+		return next, nil
+	}
+	if d, ok := digitOf(msg); ok && d >= '1' && d <= '9' {
+		n := int(d - '0')
+		if n > len(m.saves) {
+			m.status, m.statusBad = "There is no run number "+itoa(n)+"; the list holds "+itoa(len(m.saves))+".", true
+			return m, nil
+		}
+		m.saveSel = n - 1
+		m.status, m.statusBad = "", false
+		return m, nil
 	}
 	return m, nil
 }

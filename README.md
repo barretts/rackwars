@@ -3,11 +3,10 @@
 A GPU trading game for the terminal: buy accelerators cheap, find electricity,
 pay Shoreline Credit's interest, and finish the 30-day closing auction solvent.
 
-**Current status: the terminal shell.** The market board, overlays, quantity box,
-layouts, and quit paths are built and tested. The trading engine (prices,
-borrowing, travel, day settlement) is not wired yet, so the keys that would use
-it say so on screen instead of pretending. Nothing has been committed to a
-release yet.
+**Current status: playable trading prototype with persistence in development.**
+Buy, sell, borrow, repay, travel, and close a 30-day run. Saves, Continue,
+backup recovery, autosave, and trace export are wired into the terminal program.
+The platform evidence gates in `TUI-TASKS.md` remain open.
 
 ## Requirements
 
@@ -47,6 +46,8 @@ friends); a cross-built binary has to be run on its own OS to count as evidence.
 ```
 rackwars [flags]
 
+  --seed N     deal a specific seed (default 1)
+  --save-dir PATH use a portable save folder
   --no-color   draw without color (NO_COLOR does the same)
   --ascii      draw with ASCII glyphs only
   --version    print the version and exit
@@ -74,10 +75,17 @@ line explanation and exit status 1; `--help` and `--version` work anywhere.
 | Enter | accept; committing a day needs a confirmation you have to answer |
 | Esc | cancel; keeps the thing you were editing |
 | `?` | help |
-| `q`, Ctrl+C | save and quit (works from any screen) |
+| `S` | save and quit; retry a failed save |
+| `x` | export an action trace from the board or ending |
+| `q`, Ctrl+C | quit; accepted actions are autosaved (Ctrl+C works from any screen) |
 
 `q` is never a shortcut while the quantity box has focus: digits and letters are
 input there, so typing a quantity cannot quit your run.
+
+Saves live under `os.UserConfigDir()/rackwars/saves` (Windows AppData or macOS
+Library/Application Support). Use `--save-dir` to override. Startup offers existing
+runs, including damaged files with an explicit backup recovery choice. Unsupported
+save schema, rules, or content versions are refused; no automatic migration exists.
 
 ## Development
 

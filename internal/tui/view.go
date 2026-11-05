@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"rackwars/internal/content"
 	"rackwars/internal/game"
 )
 
@@ -15,7 +16,11 @@ const sideWidth = 30
 // View implements tea.Model. The board always owns the alternate screen, so an
 // overlay closing cannot leave stale output behind.
 func (m Model) View() tea.View {
-	v := tea.NewView(m.render())
+	rendered := m.render()
+	if m.saveErr != "" {
+		rendered = "NOT ON DISK ? press S to retry saving\n" + rendered
+	}
+	v := tea.NewView(rendered)
 	v.AltScreen = true
 	return v
 }
@@ -27,6 +32,9 @@ func (m Model) render() string {
 	// One snapshot per frame: every box, panel, and status line on this screen
 	// reads the same engine state, so no two parts of the frame can disagree.
 	b := m.snapshot()
+	if m.mode == modeContinue {
+		return strings.Join(m.continueLines(), "\n")
+	}
 	if m.over() {
 		m.mode = modeEnd
 		return strings.Join(m.endLines(), "\n")
@@ -51,6 +59,61 @@ func (m Model) render() string {
 // closing numbers cannot be scrolled off by a small terminal.
 func (m Model) endLines() []string {
 	lines := m.endScreen(m.snapshot())
+	for len(lines) < m.height {
+		lines = append(lines, "")
+	}
+	if len(lines) > m.height {
+		lines = lines[:m.height]
+	}
+	for i, l := range lines {
+		lines[i] = m.chrome.fitPad(l, m.width)
+	}
+	return lines
+}
+
+// continueLines is the start-up list of saved runs. Like the ending screen it
+// fills the frame instead of overlaying a box, because the choice it is asking
+// for must not be missable: the alternative is starting a fresh run over a run the
+// player believed they had kept.
+func (m Model) continueLines() []string {
+	folder := "(no save folder)"
+	if m.store != nil {
+		folder = m.store.Dir
+	}
+	lines := []string{
+		m.chrome.Title("RACK WARS") + m.chrome.Muted("   saved runs"),
+		m.chrome.Muted(folder),
+		m.chrome.Muted(m.chrome.Rule(64)),
+		"",
+	}
+	for i, e := range m.saves {
+		marker, num := "  ", itoa(i+1)
+		if i == m.saveSel {
+			marker, num = m.chrome.Plain("> "), m.chrome.Bold(num)
+		}
+		if e.Err != nil {
+			lines = append(lines, m.chrome.fitPad(marker+num+"  "+m.chrome.Bad(e.ID+"  this save cannot be opened"), m.width))
+			lines = append(lines, m.chrome.fitPad("    "+m.chrome.Muted(e.Err.Error()), m.width))
+			continue
+		}
+		state := "still open"
+		switch e.Over {
+		case game.EndClosed:
+			state = "closed on day " + itoa(content.DayCount)
+		case game.EndRepossessed:
+			state = "repossessed"
+		}
+		lines = append(lines, m.chrome.fitPad(marker+num+"  seed "+itoa(int(e.Seed))+
+			m.chrome.Plain("   day "+itoa(e.Day)+"/"+itoa(content.DayCount)+
+				"   cash "+game.FormatMoney(e.Cash)+"   debt "+game.FormatMoney(e.Debt)), m.width))
+		lines = append(lines, m.chrome.fitPad("    "+m.chrome.Muted(string(e.Market)+"   "+state+
+			"   written "+e.Written), m.width))
+	}
+	lines = append(lines, "")
+	if m.status != "" {
+		lines = append(lines, m.chrome.fitPad(m.chrome.Bad(m.status), m.width))
+	}
+	lines = append(lines, m.chrome.Muted("[enter] carry on   [n] new run   [r] recover the backup   [1-9] pick   [q] quit"))
 	for len(lines) < m.height {
 		lines = append(lines, "")
 	}

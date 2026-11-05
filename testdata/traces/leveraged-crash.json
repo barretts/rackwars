@@ -1,23 +1,23 @@
 {
   "config": {
-    "Seed": 1,
-    "Products": [
+    "seed": 1,
+    "products": [
       "3090sled",
       "4090",
       "h100"
     ],
-    "Markets": [
+    "markets": [
       "garage",
       "ashburn",
       "westtexas"
     ],
-    "Rules": {
-      "Hosting": false,
-      "Power": false,
-      "Heat": false,
-      "Encounters": false,
-      "Leases": false,
-      "Allocations": false
+    "rules": {
+      "hosting": false,
+      "power": false,
+      "heat": false,
+      "encounters": false,
+      "leases": false,
+      "allocations": false
     }
   },
   "actions": [
