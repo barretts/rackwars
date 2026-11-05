@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"rackwars/internal/content"
 	"rackwars/internal/game"
 )
 
@@ -23,6 +24,10 @@ const (
 	modeBoard mode = iota
 	modeQty
 	modeHelp
+	modeLender
+	modeTravel
+	modeConfirm
+	modeEnd
 )
 
 type tradeAction int
@@ -32,18 +37,28 @@ const (
 	actionSell
 )
 
+type loanAction int
+
+const (
+	loanBorrow loanAction = iota
+	loanRepay
+)
+
 // ProductRow is one market line as the board displays it.
 type ProductRow struct {
-	Name  string
-	Ask   game.Money
-	Bid   game.Money
-	Stock int
-	Owned int
-	Slots int
+	Product content.ProductID
+	Name    string
+	Ask     game.Money
+	Bid     game.Money
+	Stock   int
+	Owned   int
+	Slots   int
 }
 
-// Board is everything the board screen renders. The engine produces it once the
-// trading rules are wired; nothing here is computed by the view.
+// Board is the board screen's read of the engine. Every field is copied from
+// engine state or an engine preview, so the view recomputes no price, limit, or
+// cost. It is rebuilt for each frame; it is never cached in the model, which is
+// what keeps a stale quote from ever reaching the screen.
 type Board struct {
 	Tag        string
 	Day        int
@@ -64,76 +79,65 @@ type Board struct {
 	Side       []string
 }
 
-// Model is the Bubble Tea model. It uses value receivers so the renderer can
-// never observe a half-applied update.
+// Model is the Bubble Tea model. run is the one authority on game state; the
+// model holds only presentation intent (which box has focus, what is typed)
+// plus the seed the run was dealt.
 type Model struct {
 	chrome Chrome
+	run    *game.Run
+	seed   uint64
+
 	width  int
 	height int
 	mode   mode
-	board  Board
 	sel    int
-	status string
+
+	status    string
+	statusBad bool
 
 	qtyAction tradeAction
 	qtyDraft  string
+
+	loanAction loanAction
+	loanDraft  string
+
+	travelSel int
+
+	// dayLog holds the receipt lines from the most recent committed day: the
+	// wire that moved, the interest charged, freight paid, and any forced sale.
+	dayLog []string
 }
 
-// New returns the initial model. board holds the current market snapshot.
-func New(chrome Chrome, board Board) Model {
-	return Model{chrome: chrome, board: board}
+// NewRun starts a prototype run on the given seed. The seed is what a player
+// reports for a bug, and what "Replay This Seed" re-deals.
+func NewRun(chrome Chrome, seed uint64) (Model, error) {
+	run, err := game.New(game.Config{
+		Seed:     seed,
+		Products: content.PrototypeProducts,
+		Markets:  content.PrototypeMarkets,
+		Rules:    content.PrototypeRules(),
+	})
+	if err != nil {
+		return Model{}, err
+	}
+	return New(chrome, run), nil
+}
+
+// New wraps an existing run, which lets a test (or a resumed save) drive a
+// model over engine state it prepared itself.
+func New(chrome Chrome, run *game.Run) Model {
+	return Model{chrome: chrome, run: run, seed: run.Config().Seed}
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd { return nil }
 
-// PreviewBoard is the Phase 1 shell fixture: real design numbers for the three
-// prototype products, fixed by hand so the shell renders a market-shaped board
-// before any engine rules exist. Phase 3 replaces it with engine state.
-func PreviewBoard() Board {
-	return Board{
-		Tag:        "shell preview",
-		Day:        1,
-		DayTotal:   30,
-		Town:       "The garage",
-		Cash:       10_000,
-		Debt:       20_000,
-		NetWorth:   -10_000,
-		Heat:       0,
-		SlotsUsed:  0,
-		SlotsTotal: 8,
-		Headline:   "Crypto looks tired; used-card listings pile up",
-		Warning:    "Deal sites say the used-card aisle is full. Cheap days may be coming.",
-		Rows: []ProductRow{
-			{Name: "3090 SLED", Ask: 1540, Bid: 1260, Stock: 12, Slots: 2},
-			{Name: "4090", Ask: 1980, Bid: 1620, Stock: 20, Slots: 1},
-			{Name: "H100", Ask: 35_200, Bid: 28_800, Stock: 2, Slots: 1},
-		},
-		Hosting:    "power off",
-		StayCost:   "-$0 lease",
-		TravelCost: "-$250 freight",
-		Side: []string{
-			"HOLDINGS",
-			"  nothing yet",
-			"",
-			"SHORELINE CREDIT",
-			"  debt     $20,000",
-			"  headroom $10,000",
-			"  tomorrow -$2,000 interest",
-			"",
-			"TRAVEL",
-			"  Ashburn    -800 lease, 16 slots",
-			"  West Texas -250 lease, 24 slots",
-		},
-	}
-}
-
-// Update implements tea.Model.
+// Update implements tea.Model. Only key handling touches the run, and it does so
+// through one applied action at a time; resizing never advances time and never
+// mutates run state.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Resizing never advances time and never mutates run state; it only
-		// changes the layout inputs.
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
@@ -141,11 +145,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+		// A finished run answers only to the ending screen's keys.
+		if m.over() {
+			m.mode = modeEnd
+			return m.handleEndKey(msg)
+		}
 		switch m.mode {
+		case modeEnd:
+			return m.handleEndKey(msg)
 		case modeHelp:
 			return m.handleHelpKey(msg)
 		case modeQty:
 			return m.handleQtyKey(msg)
+		case modeLender:
+			return m.handleLenderKey(msg)
+		case modeTravel:
+			return m.handleTravelKey(msg)
+		case modeConfirm:
+			return m.handleConfirmKey(msg)
 		default:
 			return m.handleBoardKey(msg)
 		}
@@ -153,160 +170,110 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "?":
-		m.mode = modeHelp
-		m.status = ""
-		return m, nil
-	case "up", "k":
-		return m.moveSelection(-1), nil
-	case "down", "j":
-		return m.moveSelection(1), nil
-	case "b", "s":
-		m.qtyAction = actionBuy
-		if msg.String() == "s" {
-			m.qtyAction = actionSell
-		}
-		m.mode = modeQty
-		m.qtyDraft = ""
-		m.status = ""
-		return m, nil
-	case "l", "t", "e":
-		m.status = "Lender, travel, and stay arrive with the trading engine; nothing changed."
-		return m, nil
-	case "esc":
-		m.status = ""
-		return m, nil
-	case "enter", "ctrl+m":
-		m.status = "Committing a day arrives with the trading engine; nothing changed."
-		return m, nil
-	}
-	return m, nil
-}
+// over reports whether the engine has closed this run.
+func (m Model) over() bool { return m.run != nil && m.run.State.Over != game.EndOpen }
 
-func (m Model) handleQtyKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-	switch key {
-	case "esc":
-		m.mode = modeBoard
-		m.qtyDraft = ""
-		return m, nil
-	case "backspace":
-		if len(m.qtyDraft) > 0 {
-			m.qtyDraft = m.qtyDraft[:len(m.qtyDraft)-1]
-		}
-		return m, nil
-	case "a", "b", "c":
-		row := m.selectedRow()
-		switch key {
-		case "a":
-			m.qtyDraft = "1"
-		case "b":
-			m.qtyDraft = "5"
-		case "c":
-			m.qtyDraft = itoa(m.maxQuantity(row))
-		}
-		m.status = ""
-		return m, nil
-	case "enter", "ctrl+m":
-		n, ok := parseQuantity(m.qtyDraft)
-		row := m.selectedRow()
-		if !ok || n < 1 {
-			m.status = "Enter a whole number of units, or Esc to cancel."
-			return m, nil
-		}
-		if limit := m.maxQuantity(row); n > limit {
-			m.status = "That many will not fit: cash, stock, and rack slots allow " + itoa(limit) + "."
-			return m, nil
-		}
-		verb := "Buying"
-		if m.qtyAction == actionSell {
-			verb = "Selling"
-		}
-		m.mode = modeBoard
-		m.status = verb + " " + itoa(n) + " " + row.Name +
-			" needs the trading engine; nothing changed."
-		m.qtyDraft = ""
-		return m, nil
+// startRun replaces the run in place, which is how New Run and Replay This Seed
+// work: same code path, different seed.
+func (m Model) startRun(seed uint64) (Model, error) {
+	run, err := game.New(game.Config{
+		Seed:     seed,
+		Products: content.PrototypeProducts,
+		Markets:  content.PrototypeMarkets,
+		Rules:    content.PrototypeRules(),
+	})
+	if err != nil {
+		return m, err
 	}
-	if r, ok := digitOf(msg); ok && len(m.qtyDraft) < 7 {
-		m.qtyDraft += string(r)
-		m.status = ""
-	}
-	return m, nil
-}
-
-// digitOf reads a typed digit. Some input paths report a printable key as text,
-// others only as a rune code with no text, so both are accepted -- but never for
-// a modified key, because Alt+digit and Ctrl+digit are commands, not numbers.
-func digitOf(msg tea.KeyPressMsg) (rune, bool) {
-	if msg.Mod != 0 {
-		return 0, false
-	}
-	if len(msg.Text) == 1 && msg.Text[0] >= '0' && msg.Text[0] <= '9' {
-		return rune(msg.Text[0]), true
-	}
-	if msg.Text == "" && msg.Code >= '0' && msg.Code <= '9' {
-		return msg.Code, true
-	}
-	return 0, false
-}
-
-func (m Model) handleHelpKey(_ tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.run = run
+	m.seed = seed
 	m.mode = modeBoard
+	m.sel = 0
+	m.status = ""
+	m.statusBad = false
+	m.dayLog = nil
+	m.qtyDraft = ""
+	m.loanDraft = ""
+	m.travelSel = 0
 	return m, nil
 }
 
-func (m Model) moveSelection(delta int) Model {
-	n := len(m.board.Rows)
-	if n == 0 {
-		return m
+// snapshot reads the engine for the frame. It calls only read-only engine
+// accessors and pure previews: no randomness, no game time.
+func (m Model) snapshot() Board {
+	r := m.run
+	b := Board{Tag: "trading prototype", DayTotal: content.DayCount, Hosting: "off (prototype)"}
+	if r == nil {
+		return b
 	}
-	m.sel = (m.sel + delta + n*2) % n
-	return m
+	st := r.State
+	b.Day = st.Day
+	b.Town = content.MarketOf(st.Market).Name
+	b.Cash = st.Cash
+	b.Debt = st.Debt
+	b.NetWorth = r.NetWorth()
+	b.Heat = st.Heat
+	b.SlotsUsed = r.SlotsUsed()
+	b.SlotsTotal = content.MarketOf(st.Market).Slots
+
+	// The board carries today's wire plus the warning for the coming close. A day
+	// outside the campaign (day 30 has no day 31) simply has no wire.
+	if hl := content.HeadlineFor(st.Day); hl != nil {
+		b.Headline = hl.Text
+		b.Warning = hl.Tomorrow
+	}
+
+	for _, row := range r.QuoteBoard() {
+		b.Rows = append(b.Rows, ProductRow{
+			Product: row.Product,
+			Name:    row.Name,
+			Ask:     row.Ask,
+			Bid:     row.Bid,
+			Stock:   row.Stock,
+			Owned:   row.Owned,
+			Slots:   row.Slots,
+		})
+	}
+
+	stay := r.PreviewStay()
+	b.StayCost = "-" + game.FormatMoney(stay.Interest+stay.Lease)
+	if dest := m.destMarket(); dest != "" {
+		pv := r.PreviewTravel(dest)
+		b.TravelCost = "-" + game.FormatMoney(pv.Freight) + " to " + content.MarketOf(dest).Name
+	} else {
+		b.TravelCost = "nowhere else to go"
+	}
+	b.Side = m.sideLines()
+	return b
 }
 
-func (m Model) selectedRow() ProductRow {
-	if m.sel < 0 || m.sel >= len(m.board.Rows) {
-		return ProductRow{}
+// otherMarkets lists the prototype's towns the player can travel to, always in
+// content order so the list is stable across runs and terminals.
+func (m Model) otherMarkets() []content.MarketID {
+	if m.run == nil {
+		return nil
 	}
-	return m.board.Rows[m.sel]
+	out := make([]content.MarketID, 0, len(content.PrototypeMarkets))
+	for _, id := range content.PrototypeMarkets {
+		if id != m.run.State.Market {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
-// maxQuantity is the preview-only clamp used by the shell fixture so quantity
-// entry behaves sensibly before the engine exposes its own limits.
-func (m Model) maxQuantity(row ProductRow) int {
-	if m.qtyAction == actionSell {
-		return row.Owned
+func (m Model) destMarket() content.MarketID {
+	opts := m.otherMarkets()
+	if m.travelSel < 0 || m.travelSel >= len(opts) {
+		return ""
 	}
-	max := row.Stock
-	if row.Slots > 0 {
-		free := m.board.SlotsTotal - m.board.SlotsUsed
-		if free < 0 {
-			free = 0
-		}
-		if bySlots := free / row.Slots; bySlots < max {
-			max = bySlots
-		}
-	}
-	if row.Ask > 0 {
-		room := 0
-		if m.board.Cash > 0 {
-			room = int(m.board.Cash / row.Ask)
-		}
-		if room < max {
-			max = room
-		}
-	}
-	if max < 0 {
-		max = 0
-	}
-	return max
+	return opts[m.travelSel]
 }
 
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// parseQuantity reads the typed quantity. Only bare digits count; anything else
+// is not a number the player meant.
 func parseQuantity(s string) (int, bool) {
 	if s == "" || strings.TrimLeft(s, "0123456789") != "" {
 		return 0, false
@@ -317,5 +284,3 @@ func parseQuantity(s string) (int, bool) {
 	}
 	return n, true
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }

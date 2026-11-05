@@ -1,6 +1,9 @@
-rackwars
-rackwars.exe
+/rackwars
+/rackwars.exe
 dist/
 *.log
 coverage.out
 *.test
+
+# working notes, not part of the release tree
+/handoff.md

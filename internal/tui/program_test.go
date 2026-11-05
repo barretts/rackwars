@@ -24,7 +24,7 @@ func TestProgramRendersBoardAndRestoresScreen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := tea.NewProgram(testModel(NewChrome(false, true)),
+	p := tea.NewProgram(mustModel(t, NewChrome(false, true), 1),
 		tea.WithContext(ctx),
 		tea.WithInput(nil),
 		tea.WithOutput(&out),
@@ -75,7 +75,7 @@ func TestScriptedKeysDriveTheShell(t *testing.T) {
 	scr := newScreen(cols, rows)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	p := tea.NewProgram(New(NewChrome(false, true), PreviewBoard()),
+	p := tea.NewProgram(mustModel(t, NewChrome(false, true), 1),
 		tea.WithContext(ctx),
 		tea.WithInput(pipeRead),
 		tea.WithOutput(scr),
@@ -101,7 +101,7 @@ func TestScriptedKeysDriveTheShell(t *testing.T) {
 	// The emulator has to agree with the model's own view, otherwise every
 	// assertion below is measuring the emulator instead of the game.
 	mustWait("board never painted", func(s string) bool { return strings.Contains(s, "PRODUCT") })
-	seeded := New(NewChrome(false, true), PreviewBoard())
+	seeded := mustModel(t, NewChrome(false, true), 1)
 	um, _ := seeded.Update(tea.WindowSizeMsg{Width: cols, Height: rows})
 	wantLines := strings.Split(strings.TrimRight(ansi.Strip(um.(Model).View().Content), " \n"), "\n")
 	gotLines := strings.Split(scr.text(), "\n")
@@ -141,9 +141,9 @@ func TestScriptedKeysDriveTheShell(t *testing.T) {
 		return strings.Contains(s, "quantity: 12")
 	})
 
-	send("\r") // accept an over-limit quantity
-	mustWait("over-limit quantity was not refused in the box", func(s string) bool {
-		return strings.Contains(s, "you need")
+	send("\r") // over the engine's limit: the box stays open and names the gap
+	mustWait("over-limit quantity was not refused inside the box", func(s string) bool {
+		return strings.Contains(s, "quantity: 12") && strings.Contains(s, "short ")
 	})
 
 	// q is a shortcut on the board, never while the quantity box has focus.
@@ -159,13 +159,21 @@ func TestScriptedKeysDriveTheShell(t *testing.T) {
 		return !strings.Contains(s, "quantity:") && strings.Contains(s, "[b]uy")
 	})
 
-	// Two Enter bytes arriving in one read must not spend two days.
+	// Two Enter bytes arriving in one read arm the confirmation and spend exactly
+	// one day. A third Enter must arm a fresh confirmation, not close another day.
 	send("\r\r")
-	mustWait("commit keys were not refused", func(s string) bool {
-		return strings.Contains(s, "nothing changed")
+	mustWait("the confirmation did not close exactly one day", func(s string) bool {
+		return strings.Contains(s, "Day 2/30")
 	})
-	if strings.Contains(scr.text(), "Day 2/30") {
-		t.Errorf("a commit key advanced the day before the engine exists:\n%s", scr.text())
+	if strings.Contains(scr.text(), "Day 3/30") {
+		t.Errorf("two Enter bytes closed two days:\n%s", scr.text())
+	}
+	send("\r")
+	mustWait("the third Enter did not arm the confirmation", func(s string) bool {
+		return strings.Contains(s, "FACE THE MORNING")
+	})
+	if strings.Contains(scr.text(), "Day 3/30") {
+		t.Errorf("the third Enter closed a second day:\n%s", scr.text())
 	}
 
 	send("\x03") // ctrl+c always quits

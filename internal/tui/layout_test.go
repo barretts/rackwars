@@ -10,8 +10,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// testModel builds a real engine-backed model on seed 1 at the minimum size, so
+// every test drives the same rules the shipped game runs on.
 func testModel(chrome Chrome) Model {
-	m := New(chrome, PreviewBoard())
+	m, err := NewRun(chrome, 1)
+	if err != nil {
+		panic("testModel: " + err.Error())
+	}
 	um, _ := m.Update(tea.WindowSizeMsg{Width: MinWidth, Height: MinHeight})
 	return um.(Model)
 }
@@ -111,7 +116,7 @@ func TestWideLayoutAddsSidePanel(t *testing.T) {
 
 func TestSmallTerminalShowsResizeMessageAndKeepsRun(t *testing.T) {
 	m := testModel(NewChrome(false, false))
-	before := m.board
+	before, beforeDay := facts(m), m.run.State.Day
 	beforeSel := m.sel
 	um, _ := m.Update(tea.WindowSizeMsg{Width: 62, Height: 10})
 	small := um.(Model)
@@ -121,9 +126,9 @@ func TestSmallTerminalShowsResizeMessageAndKeepsRun(t *testing.T) {
 			t.Errorf("small frame missing %q:\n%s", want, got)
 		}
 	}
-	if small.board.Day != before.Day || small.sel != beforeSel {
-		t.Errorf("shrinking changed the run: day %d sel %d, want day %d sel %d",
-			small.board.Day, small.sel, before.Day, beforeSel)
+	if small.run.State.Day != beforeDay || small.sel != beforeSel || facts(small) != before {
+		t.Errorf("shrinking changed the run: day %d sel %d facts %s, want day %d sel %d facts %s",
+			small.run.State.Day, small.sel, facts(small), beforeDay, beforeSel, before)
 	}
 	lines := frameLines(t, small)
 	if len(lines) > 10 {
@@ -139,14 +144,14 @@ func TestSmallTerminalShowsResizeMessageAndKeepsRun(t *testing.T) {
 func TestResizeNeverAdvancesRun(t *testing.T) {
 	m := testModel(NewChrome(false, false))
 	m = send(m, "j", "b") // move selection, open the quantity box
-	before := m.board
+	before := facts(m)
 	beforeSel, beforeMode := m.sel, m.mode
 	for i := range 20 {
 		um, _ := m.Update(tea.WindowSizeMsg{Width: 60 + i*4, Height: 12 + i})
 		m = um.(Model)
 	}
-	if m.board.Day != before.Day || fmt.Sprint(m.board) != fmt.Sprint(before) {
-		t.Errorf("resizing mutated the run:\nbefore %+v\nafter  %+v", before, m.board)
+	if facts(m) != before {
+		t.Errorf("resizing mutated the run:\nbefore %s\nafter  %s", before, facts(m))
 	}
 	if m.sel != beforeSel || m.mode != beforeMode {
 		t.Errorf("resizing moved the interface: sel %d->%d mode %v->%v", beforeSel, m.sel, beforeMode, m.mode)
@@ -254,18 +259,29 @@ func TestWarningUsesTextNotOnlyColor(t *testing.T) {
 	}
 }
 
+// TestLongHeadlineAndNumbersStayInsideColumns feeds the renderer a board whose
+// text and figures are deliberately absurd. The engine cannot produce these, but
+// the layout contract has to hold for anything the engine ever will, so this
+// tests mainLines directly rather than poking at run state.
 func TestLongHeadlineAndNumbersStayInsideColumns(t *testing.T) {
 	m := testModel(NewChrome(false, false))
-	m.board.Headline = strings.Repeat("STARGATE ANNOUNCES A VERY LARGE NUMBER ", 12)
-	m.board.Cash = 123_456_789_012
-	m.board.Debt = -98_765_432_100
-	m.board.Rows[2].Ask = 999_999_999_999
+	b := m.snapshot()
+	b.Headline = strings.Repeat("STARGATE ANNOUNCES A VERY LARGE NUMBER ", 12)
+	b.Warning = strings.Repeat("EVERYTHING YOU OWN COULD BE TAKEN ", 8)
+	b.Cash = 123_456_789_012
+	b.Debt = -98_765_432_100
+	if len(b.Rows) > 2 {
+		b.Rows[2].Ask = 999_999_999_999
+	}
+	b.Side = append(b.Side, strings.Repeat("NESTED DETAIL TEXT ", 20))
 	for _, width := range []int{80, 81, 99, 120, 200} {
 		um, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: MinHeight})
 		mm := um.(Model)
-		for i, l := range frameLines(t, mm) {
-			if w := ansi.StringWidth(l); w > width {
-				t.Errorf("width %d line %d is %d cells: %q", width, i, w, l)
+		for _, lines := range [][]string{mm.mainLines(b, width), mm.wideBoardLines(b)} {
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w > width {
+					t.Errorf("width %d line %d is %d cells: %q", width, i, w, l)
+				}
 			}
 		}
 	}
@@ -277,7 +293,7 @@ func TestHelpOverlayFitsMinimumSize(t *testing.T) {
 	if len(lines) > MinHeight {
 		t.Fatalf("help frame is %d lines, want at most %d:\n%s", len(lines), MinHeight, frame(m))
 	}
-	for _, want := range []string{"KEYS", "buy or sell the selected product", "esc", "committing a day"} {
+	for _, want := range []string{"KEYS", "buy or sell the selected product", "esc", "advances the clock"} {
 		if !strings.Contains(strings.ToLower(frame(m)), strings.ToLower(want)) {
 			t.Errorf("help missing %q:\n%s", want, frame(m))
 		}
@@ -309,4 +325,27 @@ func TestOverlayKeepsBoardVisible(t *testing.T) {
 			t.Errorf("overlay hid %q:\n%s", want, frame(m))
 		}
 	}
+}
+
+// facts captures the run-level numbers a test must not perturb. The model holds
+// a pointer to the run, so comparing a copied Board struct would let an in-place
+// engine mutation slip through; these scalars cannot.
+func facts(m Model) string {
+	r := m.run
+	if r == nil {
+		return "no run"
+	}
+	st := r.State
+	owned, stock := 0, 0
+	for _, p := range r.Products() {
+		owned += r.OwnedOf(p)
+		stock += r.StockOf(p)
+	}
+	return fmt.Sprintf("day=%d town=%s cash=%d debt=%d heat=%d owned=%d stock=%d slots=%d",
+		st.Day, st.Market, st.Cash, st.Debt, st.Heat, owned, stock, r.SlotsUsed())
+}
+
+// statusLineOf reads the board's live status text with styling turned off.
+func statusLineOf(m Model) string {
+	return ansi.Strip(m.statusLine(m.snapshot()))
 }

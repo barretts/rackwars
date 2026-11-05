@@ -24,27 +24,56 @@ func (m Model) render() string {
 	if m.width < MinWidth || m.height < MinHeight {
 		return strings.Join(m.tooSmallLines(), "\n")
 	}
+	// One snapshot per frame: every box, panel, and status line on this screen
+	// reads the same engine state, so no two parts of the frame can disagree.
+	b := m.snapshot()
+	if m.over() {
+		m.mode = modeEnd
+		return strings.Join(m.endLines(), "\n")
+	}
 	switch m.mode {
 	case modeQty:
-		return strings.Join(m.overlayLines(m.qtyBox()), "\n")
+		return strings.Join(m.overlayLines(m.qtyBox(b)), "\n")
+	case modeLender:
+		return strings.Join(m.overlayLines(m.lenderBox(b)), "\n")
+	case modeTravel:
+		return strings.Join(m.overlayLines(m.travelBox(b)), "\n")
+	case modeConfirm:
+		return strings.Join(m.overlayLines(m.confirmBox(b)), "\n")
 	case modeHelp:
 		return strings.Join(m.overlayLines(m.helpBox()), "\n")
 	default:
-		return strings.Join(m.boardLines(), "\n")
+		return strings.Join(m.boardLines(b), "\n")
 	}
 }
 
-func (m Model) boardLines() []string {
+// endLines fills the screen with the ending rather than overlaying a box, so the
+// closing numbers cannot be scrolled off by a small terminal.
+func (m Model) endLines() []string {
+	lines := m.endScreen(m.snapshot())
+	for len(lines) < m.height {
+		lines = append(lines, "")
+	}
+	if len(lines) > m.height {
+		lines = lines[:m.height]
+	}
+	for i, l := range lines {
+		lines[i] = m.chrome.fitPad(l, m.width)
+	}
+	return lines
+}
+
+func (m Model) boardLines(b Board) []string {
 	if m.width >= WideWidth {
-		return m.wideBoardLines()
+		return m.wideBoardLines(b)
 	}
-	return m.mainLines(m.width)
+	return m.mainLines(b, m.width)
 }
 
-func (m Model) wideBoardLines() []string {
+func (m Model) wideBoardLines(b Board) []string {
 	mainW := m.width - sideWidth - 1
-	main := m.mainLines(mainW)
-	panel := m.sidePanel(sideWidth)
+	main := m.mainLines(b, mainW)
+	panel := m.sidePanel(b.Side, sideWidth)
 	out := make([]string, max(len(main), len(panel)))
 	for i := range out {
 		left, right := "", ""
@@ -61,8 +90,7 @@ func (m Model) wideBoardLines() []string {
 
 // mainLines is the market board. Width drives truncation only; the row set and
 // order come from the engine snapshot.
-func (m Model) mainLines(width int) []string {
-	b := m.board
+func (m Model) mainLines(b Board, width int) []string {
 	tag := ""
 	if b.Tag != "" {
 		tag = "  [" + b.Tag + "]"
@@ -93,11 +121,50 @@ func (m Model) mainLines(width int) []string {
 
 	lines = append(lines, m.chrome.Rule(width))
 	lines = append(lines, m.chrome.fitPad(m.chrome.Muted("Hosting: "+b.Hosting)+
-		m.chrome.Plain("  stay "+b.StayCost+"  travel "+b.TravelCost), width))
-	lines = append(lines, m.chrome.fitPad(m.statusLine(), width))
+		m.chrome.Plain("  overnight "+b.StayCost+" interest  travel "+b.TravelCost), width))
+	lines = append(lines, m.chrome.fitPad(m.statusLine(b), width))
 	lines = append(lines, m.chrome.fitPad(m.chrome.Muted(
-		"[b]uy  [s]ell  [l]ender  [t]ravel  [e]stay  [enter] commit day  [?]help  [q]uit"), width))
+		"[b]uy  [s]ell  [l]ender  [t]ravel  [e]/[enter] face morning  [?]help  [q]uit"), width))
 	return lines
+}
+
+// statusLine is the board's live read of the selected card: its quotes, what the
+// player holds, and the largest quantity the engine would accept right now, with
+// the constraint that binds. None of it is computed here.
+func (m Model) statusLine(b Board) string {
+	if m.status != "" {
+		if m.statusBad {
+			return m.chrome.Bad(m.status)
+		}
+		return m.chrome.Warn(m.status)
+	}
+	row := boardRow(b, m.sel)
+	if row.Name == "" {
+		return m.chrome.Muted("No products here.")
+	}
+	limits := m.run.BuyLimits(row.Product)
+	if m.qtyAction == actionSell {
+		limits = m.run.SellLimits(row.Product)
+	}
+	bound := "cash"
+	switch limits.LimitBy {
+	case game.ReasonOvercapacity:
+		bound = "slots"
+	case game.ReasonInsufficientStock:
+		bound = "shop stock"
+	case game.ReasonOK:
+		bound = "what you hold"
+	}
+	return m.chrome.Muted(fmt.Sprintf("%s: buy %s  sell %s  stock %d, you hold %d (%d slot%s)  most %s: %d (%s)",
+		row.Name, game.FormatMoney(row.Ask), game.FormatMoney(row.Bid), row.Stock, row.Owned,
+		row.Slots, plural(row.Slots), verbOf(m.qtyAction), limits.Max, bound))
+}
+
+func verbOf(a tradeAction) string {
+	if a == actionSell {
+		return "sell"
+	}
+	return "buy"
 }
 
 func (m Model) productLine(width, i int, row ProductRow) string {
@@ -114,26 +181,10 @@ func (m Model) productLine(width, i int, row ProductRow) string {
 	return line
 }
 
-func (m Model) statusLine() string {
-	if m.status != "" {
-		if strings.HasPrefix(m.status, "That many") || strings.HasPrefix(m.status, "Enter a whole") {
-			return m.chrome.Bad(m.status)
-		}
-		return m.chrome.Warn(m.status)
-	}
-	row := m.selectedRow()
-	if row.Name == "" {
-		return m.chrome.Muted("No products here.")
-	}
-	return m.chrome.Muted(fmt.Sprintf("%s: buy %s  sell %s  %d in stock, you hold %d (%d slot%s each)",
-		row.Name, game.FormatMoney(row.Ask), game.FormatMoney(row.Bid), row.Stock, row.Owned,
-		row.Slots, plural(row.Slots)))
-}
-
-func (m Model) sidePanel(width int) []string {
-	out := make([]string, 0, len(m.board.Side)+2)
+func (m Model) sidePanel(lines []string, width int) []string {
+	out := make([]string, 0, len(lines)+2)
 	out = append(out, m.chrome.Head(m.chrome.fitPad("DETAIL", width)))
-	for _, l := range m.board.Side {
+	for _, l := range lines {
 		out = append(out, m.chrome.fitPad(m.chrome.Muted(l), width))
 	}
 	return out
@@ -142,7 +193,7 @@ func (m Model) sidePanel(width int) []string {
 // overlayLines draws box on top of the current board, centered, sized to the
 // widest box line. Base rows outside the box stay visible.
 func (m Model) overlayLines(box []string) []string {
-	base := m.mainLines(m.width)
+	base := m.mainLines(m.snapshot(), m.width)
 	if len(base) < m.height {
 		for len(base) < m.height {
 			base = append(base, "")
@@ -168,94 +219,6 @@ func (m Model) overlayLines(box []string) []string {
 		out[r] = m.chrome.fitPad("  "+m.chrome.fit(l, boxW), m.width)
 	}
 	return out
-}
-
-func (m Model) qtyBox() []string {
-	row := m.selectedRow()
-	verb, price := "BUY", row.Ask
-	if m.qtyAction == actionSell {
-		verb, price = "SELL", row.Bid
-	}
-	n, ok := parseQuantity(m.qtyDraft)
-	if !ok {
-		n = 0
-	}
-	limit := m.maxQuantity(row)
-	freeSlots := m.board.SlotsTotal - m.board.SlotsUsed
-
-	lines := []string{
-		m.chrome.Title(verb + " " + row.Name),
-		m.chrome.Muted(m.chrome.Rule(44)),
-		fmt.Sprintf("ask %-10s bid %-10s stock %d  you hold %d",
-			game.FormatMoney(row.Ask), game.FormatMoney(row.Bid), row.Stock, row.Owned),
-		fmt.Sprintf("free slots %d of %d   %s costs %s each",
-			freeSlots, m.board.SlotsTotal, row.Name, game.FormatMoney(price)),
-		"",
-		fmt.Sprintf("quantity: %s  (max %d here)", m.qtyDraft+"_", limit),
-	}
-	// The preview shows the consequence even when it is refused, in the colour
-	// of a problem, so the number on screen never claims a deal the engine will
-	// not allow.
-	cost := int64(n) * int64(price)
-	cashAfter := int64(m.board.Cash) - cost
-	slotsAfter := int64(freeSlots) - int64(n*row.Slots)
-	switch {
-	case m.qtyAction == actionSell && n > row.Owned:
-		lines = append(lines, m.chrome.Bad(fmt.Sprintf("you hold %d %s, not %d",
-			row.Owned, row.Name, n)))
-	case m.qtyAction == actionSell:
-		proceeds := int64(n) * int64(row.Bid)
-		lines = append(lines, fmt.Sprintf("proceeds %s   cash after %s",
-			game.FormatMoney(game.Money(proceeds)),
-			game.FormatMoney(game.Money(int64(m.board.Cash)+proceeds))))
-	case cashAfter < 0:
-		lines = append(lines, m.chrome.Bad(fmt.Sprintf("cost %s  you need %s more",
-			game.FormatMoney(cost), game.FormatMoney(game.Money(-cashAfter)))))
-	case slotsAfter < 0:
-		lines = append(lines, m.chrome.Bad(fmt.Sprintf("cost %s  you need %d more slots",
-			game.FormatMoney(cost), -slotsAfter)))
-	case n > row.Stock:
-		lines = append(lines, m.chrome.Bad(fmt.Sprintf("cost %s  only %d in stock",
-			game.FormatMoney(cost), row.Stock)))
-	default:
-		lines = append(lines, fmt.Sprintf("cost %s   cash after %s   slots left %d",
-			game.FormatMoney(cost), game.FormatMoney(cashAfter), slotsAfter))
-	}
-	// The reason a submission was refused has to sit inside the box: the box
-	// covers the board's status line, so an explanation out there is invisible
-	// while the player is still correcting the number.
-	if m.status != "" {
-		lines = append(lines, m.status)
-	}
-	return append(lines,
-		"",
-		m.chrome.Muted("[a] 1  [b] 5  [c] max   [enter] next   [esc] cancel"),
-		m.chrome.Muted("type digits to set an exact number"),
-	)
-}
-
-func (m Model) helpBox() []string {
-	return []string{
-		m.chrome.Title("RACK WARS KEYS"),
-		m.chrome.Muted(m.chrome.Rule(44)),
-		"up/down or j/k    pick a product",
-		"b / s             buy or sell the selected product",
-		"a / b / c         quantity 1, 5, or max in the quantity box",
-		"digits            type an exact quantity",
-		"l                 lender: borrow, repay, headroom, stress preview",
-		"t                 travel: freight, capacity, risk",
-		"e                 stay: host or power off",
-		"enter             accept; committing a day needs confirmation",
-		"esc               cancel the current box, nothing changes",
-		"?                 this help",
-		"q or ctrl+c       save and quit",
-		"",
-		m.chrome.Muted("Buying, selling, and borrowing never cost a day."),
-		m.chrome.Muted("Only a confirmed Travel or Stay advances the clock."),
-		m.chrome.Muted("Resizing the window never advances the clock either."),
-		"",
-		m.chrome.Muted("press any key to go back"),
-	}
 }
 
 func (m Model) tooSmallLines() []string {
