@@ -6,11 +6,11 @@ All tasks start unchecked. A checkbox means the work and its required evidence e
 
 ## Phase 1 — Terminal foundation
 
-- [ ] Initialize Go module; pin toolchain and compatible Bubble Tea/Lip Gloss v2 dependencies.
-- [ ] Build the market-shaped terminal shell, selection, overlay, help, and clean exit.
-- [ ] Support 80×24, wider layouts, resizing, ASCII, no-color, and non-TTY errors.
+- [x] Initialize Go module; pin toolchain and compatible Bubble Tea/Lip Gloss v2 dependencies.
+- [x] Build the market-shaped terminal shell, selection, overlay, help, and clean exit.
+- [x] Support 80×24, wider layouts, resizing, ASCII, no-color, and non-TTY errors.
 - [ ] Verify key handling and terminal restoration in macOS Terminal.app and Windows Terminal.
-- [ ] Record OS minimums and architecture coverage; add native CI tests/builds when available.
+- [x] Record OS minimums and architecture coverage; add native CI tests/builds when available.
 - [ ] Close the platform gate with interactive evidence for both primary operating systems.
 
 ## Phase 2 — Trading engine
@@ -81,6 +81,68 @@ Commands, seed, or action trace:
 Observed result:
 Open gaps and next owner:
 Gate: passed / incomplete
+```
+
+```text
+Phase: 1 — Terminal foundation
+Owner: omp session (expert-engineer-peirce)
+Commit/build and engine/content version: commit 9ab28b9 on branch main (first
+  commit of the repository). Binary `rackwars 0.1.0-phase1`, built with
+  `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.1.0-phase1"
+  -o dist/rackwars.exe ./cmd/rackwars`. Dependencies pinned by go.mod
+  (`go 1.26.0`): charm.land/bubbletea/v2 v2.1.1, charm.land/lipgloss/v2 v2.0.6,
+  github.com/charmbracelet/x/ansi v0.11.9, github.com/charmbracelet/x/term v0.2.2.
+OS / architecture / terminal: Windows 11 build 26200, x64 (GOAMD64=v1 default).
+  Interactive runs were driven through a ConPTY pseudo-terminal created by the
+  agent harness (Git Bash/MSYS parent), which is the same ConPTY path Windows
+  Terminal uses, but the Windows Terminal UI itself was not driven. No macOS host
+  is reachable from this environment, so no darwin evidence exists.
+Commands, seed, or action trace:
+  Static: `gofmt -l .` (no output); `go vet ./...` (clean);
+  `go test -race ./... -count=1 -timeout 300s` -> ok rackwars/internal/game,
+  ok rackwars/internal/tui, no race reports.
+  Interactive key trace (no seed; the shell has no engine yet), run as
+  `./dist/rackwars.exe --ascii` inside ConPTY: `\x1b[B` (selection moved to the
+  4090 row), `?` (help painted), a lone `\x1b` (help closed), `b` (quantity box
+  opened), `12` typed (over-limit refusal painted *inside* the box), `q` (did
+  NOT quit while the box had focus), `\x1b` (cancelled), `\r\r` (day never
+  advanced; "Day 2/30" was never painted), Ctrl+C -> exit code 0 and the
+  alt-screen exit sequence was emitted (terminal restored).
+  Colour-off: `NO_COLOR=1 ./dist/rackwars.exe --no-color` inside ConPTY -> full
+  board painted, Ctrl+C -> exit code 0.
+  Non-TTY: `echo hi | ./dist/rackwars.exe` -> "RACK WARS needs an interactive
+  terminal. Run it from Terminal.app, iTerm2, Windows Terminal, or PowerShell."
+  and exit code 1; `--version` -> `rackwars 0.1.0-phase1` exit 0; `--help` ->
+  usage exit 0; unknown argument -> usage exit 2.
+  Scripted in-process (same key bytes, no PTY):
+  `go test ./internal/tui -run TestScriptedKeysDriveTheShell` feeds real bytes
+  through os.Pipe() into tea.WithInput, renders through the real Bubble Tea
+  renderer, and rebuilds the visible screen grid (cursor moves, EL/ED, CR/LF)
+  before asserting; it also asserts the rebuilt grid equals ansi.Strip(View())
+  row by row.
+Observed result: 80x24 monochrome frame occupies 13 lines and stays within 80
+  cells; the 120-column run paints the side panel (DETAIL / HOLDINGS / SHORELINE
+  CREDIT / TRAVEL) and truncates with `~` in ASCII mode; Unicode rules and the
+  `»` marker and their ASCII `-` / `>` replacements both render correctly; every
+  frame stays under 80 SGR escape pairs (TestFrameStaysWithinEscapeBudget, added
+  after measuring that Lip Gloss v2 emits one SGR pair per grapheme when
+  Bold+Underline are combined, so the header style uses Reverse+Bold instead);
+  refusal reasons render inside the quantity box because the box covers the
+  board status line; `q` is not a shortcut while quantity entry has focus; two
+  Enters never commit two days; Ctrl+C exits 0 with the terminal restored.
+Open gaps and next owner:
+  1. No macOS interactive evidence. Next owner must replay the key trace above in
+     Terminal.app on darwin/arm64 and on an Intel (darwin/amd64) Mac, and record
+     the terminal restoration check there.
+  2. `.github/workflows/ci.yml` is authored (windows-latest + macos-latest: vet,
+     gofmt, CGO_ENABLED=0 build, tests, race tests on macOS, `--version` smoke)
+     but has never executed: this repository has no remote and no Actions run
+     history. Next owner pushes it and records the run URL.
+  3. Resizing is covered only by synthesized `WindowSizeMsg` (narrow/wide switch)
+     and never by a real SIGWINCH from a resized window.
+  4. Key handling was verified in a ConPTY pseudo-terminal, not in the Windows
+     Terminal application window.
+Gate: incomplete
 ```
 
 Optional content remains outside the base-release gates. See the detailed plan before adding another feature or changing an acceptance criterion.
