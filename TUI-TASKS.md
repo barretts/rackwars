@@ -15,12 +15,12 @@ All tasks start unchecked. A checkbox means the work and its required evidence e
 
 ## Phase 2 — Trading engine
 
-- [ ] Define deterministic state, validated actions, integer money/power, and content IDs.
-- [ ] Implement three markets and three products with finite stock and stable morning quotes.
-- [ ] Implement buying, selling, borrowing, repayment, capacity, freight, and interest.
-- [ ] Implement margin cures, forced sales, surplus proceeds, and insolvency.
-- [ ] Add price anchors, 30-day settlement, score, and headless action traces.
-- [ ] Pass rule tests and record a winning trading trace and a warned leveraged-loss trace.
+- [x] Define deterministic state, validated actions, integer money/power, and content IDs.
+- [x] Implement three markets and three products with finite stock and stable morning quotes.
+- [x] Implement buying, selling, borrowing, repayment, capacity, freight, and interest.
+- [x] Implement margin cures, forced sales, surplus proceeds, and insolvency.
+- [x] Add price anchors, 30-day settlement, score, and headless action traces.
+- [x] Pass rule tests and record a winning trading trace and a warned leveraged-loss trace.
 
 ## Phase 3 — Playable trading TUI
 
@@ -145,4 +145,109 @@ Open gaps and next owner:
 Gate: incomplete
 ```
 
-Optional content remains outside the base-release gates. See the detailed plan before adding another feature or changing an acceptance criterion.
+```text
+Phase: 2 - Trading engine
+Owner: omp session (expert-engineer-peirce)
+Commit/build and engine/content version: commit d7ac9cc on branch main, on top of
+  9ab28b9 and 5973d2d (Phase 1). Engine content version: internal/content tables
+  (3 prototype markets: garage, ashburn, westtexas; 3 prototype products:
+  3090sled, 4090, h100) plus the 30-day campaign table, validated by
+  content.Validate. Binary `rackwars 0.1.0-phase2`, built with
+  `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.1.0-phase2"
+  -o dist/rackwars.exe ./cmd/rackwars`; the shipped binary is still the Phase 1
+  shell (the engine is not wired into the TUI until Phase 3), so `--version`,
+  `--help`, and the non-TTY guard are the only new-binary checks here.
+OS / architecture / terminal: Windows 11 build 26200, x64 (go1.26.0
+  windows/amd64, GOAMD64=v1, CGO_ENABLED=0). Phase 2 is headless: the surface is
+  `go test`, no terminal interaction required. Git Bash/MSYS parent shell. No
+  macOS host reachable, so no darwin test run exists.
+Commands, seed, or action trace:
+  Static: `gofmt -l .` (no output); `go vet ./...` (clean).
+  `go test ./... -count=1` -> ok rackwars/internal/content (21 tests),
+  ok rackwars/internal/game (25 tests), ok rackwars/internal/sim (6 tests),
+  ok rackwars/internal/tui (34 tests).
+  `go test -race ./... -count=1 -timeout 300s` -> same four packages ok, no race
+  reports.
+  Winning trade-only trace, recorded in the repository and replayed from disk:
+  `testdata/traces/trade-repay-win.json` (+ `.txt`, `.golden.json`) - seed 1,
+  policy trade-repay, 34 actions, cast 3090sled/4090/h100, markets
+  garage/ashburn/westtexas, prototype rules. Check it with
+  `go test ./internal/sim -run TestRecordedTracesStillReplay -count=1`.
+  Warned leveraged-loss trace: `testdata/traces/leveraged-crash.json`
+  (+ `.txt`, `.golden.json`) - seed 1, policy leveraged, 10 actions.
+  Balance table: `go test ./internal/sim -run TestPoliciesFinishEveryRun
+  -count=1 -v` prints 12 seeds x 3 policies (trade-repay, hold, leveraged).
+Observed result:
+  Trade-and-repay finish (TUI-PLAN gate 2, first half): seed 1 buys nothing until
+  day 2's headline warns "A merger announcement tomorrow is expected to call GPUs
+  finished"; on day 3 the announced crash lands in West Texas (3090 sled ask
+  $327, i.e. 27% of that town's usual midpoint) and the policy buys 12 units for
+  $3,924 and pays $4,576 on the note the same morning. It holds through days 4-6
+  while the balance compounds, sells all 12 on the morning of day 7 for $28,776
+  gross (about 2.0x the usual midpoint), repays the remaining $28,734, and closes
+  on day 30 with cash-out $1,042, borrowed $0, repaid $33,310, interest paid
+  $13,310, zero forced sales. `TestGateTradeAndRepayFinish` fails unless the win
+  has Borrowed == 0, Repaid > 0, and Interest > 0, so a jackpot- or credit-
+  subsidised finish cannot satisfy the gate.
+  Warned leveraged crash (second half): seed 1 under the leveraged policy borrows
+  $14,468, buys 8 4090s, and is forced to sell 8 units across days 5, 7 and 8
+  (recorded loss $942, interest paid $24,897), ending repossessed on day 8 with
+  $32,630 owed. `TestGateWarnedLeveragedCrash` asserts a non-empty Tomorrow line
+  on the morning before every forced-sale day in the run, that the player had
+  borrowed, and that the forced sales actually cost money. The fall that broke
+  this run was announced the morning before it landed (day 2 Tomorrow), and the
+  rebound that would have saved it was announced too (day 5 Tomorrow: "A chatbot
+  launch is expected to create demand for ordinary consumer cards.").
+  Reproducibility (third half): the recorded JSON holds only the config and the
+  action list. `TestRecordedTracesStillReplay` decodes both fixtures, replays
+  them, and compares cash/debt/net worth/ending/statistics against the sibling
+  `.golden.json`; `TestSameSeedSameActionsProduceIdenticalRuns`,
+  `TestDifferentSeedsGiveDifferentBoards`, `TestPreviewsArePureAndExact` and
+  `TestTraceRoundTripReproducesRun` cover the same property in-engine, and
+  `internal/sim.Play` re-derives every step log by replaying the actions against
+  a fresh run, so a trace that is quoted as evidence is always re-runnable.
+  Worked debt examples (fourth half): `TestUntouchedNoteGrowsTenPercentPerDay`
+  reconciles the $20,000 starter note to $22,000 and $24,200 after one and two
+  days; `TestInterestRoundsUpToNextDollar`; `TestBorrowIsBoundedByCollateral`;
+  `TestForcedSaleWorkedExample` reproduces the design's two-H100 shock exactly
+  (bids $40,000 -> $16,000, collateral $32,000, ceiling $46,000, breach $14,000,
+  two forced sales, $28,000 debt, $0 cash, no repossession);
+  `TestCashCureHappensBeforeForcedSale`, `TestSaleProceedsRouteToLenderFirst`
+  (whole-unit surplus returned to cash), `TestRepossessionOnlyWhenNothingLeft`
+  and `TestRefusalsCarryExactGaps` cover the rest of the credit section.
+  Balance table over 12 seeds: trade-repay reaches the day-30 close on 8 seeds
+  and finishes with a positive cash-out on 3 (seeds 1, 2, 5); hold is repossessed
+  on all 12 (days 10-17); leveraged is repossessed on all 12 (days 4-9) with 8-10
+  forced units each. Every run ends in a terminal state - no run hits the
+  400-action budget.
+  Defects found and fixed while producing this evidence:
+  1. `content.CampaignFor` assigned `h.Effects = nil` before ranging over
+     `h.Effects`, so every campaign effect was dropped and no campaign price move
+     ever applied in any run. Fixed and covered by
+     `TestCampaignForPrunesForeignProducts` and `TestEveryBigCampaignMoveIsAnnounced`.
+  2. The day-30 closing auction settled a positive cash-out by subtracting it from
+     debt, leaving a negative debt balance that the ending screen would have shown
+     as the lender owing the player money. Settlement now zeroes the note and hands
+     the remainder back as cash; `TestDay30ClosesTheRun` pins it, and
+     `internal/sim.Play` polices cash >= 0, debt >= 0, and slot capacity on every
+     driven step.
+  3. Content validation could not see campaign effects pointing at products or
+     markets outside the cast; Validate now checks the full campaign table and
+     rejects dangling IDs, and CampaignFor prunes effects that are legal in the
+     table but foreign to the cast.
+Open gaps and next owner:
+  1. The winning margin is thin: the best of twelve seeds clears only $1,042 after
+     paying $13,310 of interest, and this policy sits flat for 23 days because it
+     only buys at 50% or less of a town's usual midpoint. The trading economy is
+     provably winnable without hosting or campaign jackpots, but the spread
+     versus the 10%/day note needs Phase 6 tuning; the balance table above is the
+     starting data for that work.
+  2. No darwin run of `go test ./...` exists (no macOS host reachable). The
+     packages are pure Go with no cgo or OS-specific code, but the next owner
+     should record the macos-latest CI result before the Phase 7 release gate.
+  3. `.github/workflows/ci.yml` still has never executed (no remote, no Actions
+     history). Next owner pushes and records the run URL.
+Gate: passed
+```
+
+Optional content remains outside the base-release gates.
