@@ -24,10 +24,10 @@ All tasks start unchecked. A checkbox means the work and its required evidence e
 
 ## Phase 3 — Playable trading TUI
 
-- [ ] Connect board selection, quantity entry, buy/sell, lender, travel, and Stay to the engine.
-- [ ] Show costs, debt exposure, capacity, known quotes, headlines, and tomorrow's warning.
-- [ ] Add invalid-action explanations, cancellation, and protection against duplicate day commitments.
-- [ ] Add receipts, ending, New Run, and Replay This Seed.
+- [x] Connect board selection, quantity entry, buy/sell, lender, travel, and Stay to the engine.
+- [x] Show costs, debt exposure, capacity, known quotes, headlines, and tomorrow's warning.
+- [x] Add invalid-action explanations, cancellation, and protection against duplicate day commitments.
+- [x] Add receipts, ending, New Run, and Replay This Seed.
 - [ ] Complete a keyboard-only 30-day run on Windows and macOS.
 - [ ] Close the trading prototype gate without hosting or jackpot subsidies.
 
@@ -248,6 +248,141 @@ Open gaps and next owner:
   3. `.github/workflows/ci.yml` still has never executed (no remote, no Actions
      history). Next owner pushes and records the run URL.
 Gate: passed
+```
+
+```text
+Phase: 3 - Playable trading TUI
+Owner: omp session (expert-engineer-peirce)
+Commit/build and engine/content version: commit 021c1c5 on branch main, on top of
+  a1bcf2c, d7ac9cc, 5973d2d and 9ab28b9 (Phases 1-2). Content version unchanged
+  from Phase 2: internal/content prototype cast (garage, ashburn, westtexas;
+  3090sled, 4090, h100) plus the 30-day campaign, validated by content.Validate,
+  with hosting, electricity, power, heat, encounters, allocations and operating
+  leases still switched off by content.PrototypeRules(). Binary
+  `rackwars 0.1.0-phase3`, built with
+  `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.1.0-phase3"
+  -o dist/rackwars.exe ./cmd/rackwars`; this is the first binary whose TUI is
+  wired to the engine.
+OS / architecture / terminal: Windows 11 build 26200, x64 (go1.26.0 windows/amd64,
+  GOAMD64=v1, CGO_ENABLED=0). Interactive runs were driven inside a ConPTY
+  pseudo-terminal started by the agent harness (about 120 columns wide, so the
+  wide layout with the DETAIL panel), parent shell Git Bash/MSYS. No macOS host
+  is reachable from this machine, so no darwin run of the game or of `go test`
+  exists.
+Commands, seed, or action trace:
+  Static: `gofmt -l .` (no output); `go vet ./...` (clean).
+  `go test ./... -count=1` -> ok rackwars/internal/content (10 tests),
+  ok rackwars/internal/game (25 tests), ok rackwars/internal/sim (6 tests),
+  ok rackwars/internal/tui (44 tests).
+  `go test -race ./... -count=1 -timeout 300s` -> same four packages ok, no race
+  reports.
+  `go test ./internal/sim -run TestRecordedTracesStillReplay -count=1` -> ok: the
+  Phase 2 fixtures `testdata/traces/trade-repay-win.{json,txt,golden.json}` and
+  `leveraged-crash.*` still replay against the engine the TUI now drives.
+  Engine-equivalence gate: `go test ./internal/tui -run TestScriptedKeyboard -v`
+  -> PASS x2. Both tests drive the real Bubble Tea program (120x30 screen
+  emulator, raw key bytes through an os.Pipe) using the action list that
+  `internal/sim.Play` produced headlessly for seed 1, translated to keys by
+  `keysFor`, and then require the painted ending to equal the engine's own
+  `End`: `TestScriptedKeyboardRunWinsOnSeedOne` (trade-repay, day-30 close) and
+  `TestScriptedKeyboardRunGetsRepossessedOnSeedOne` (leveraged, repossession).
+  The key bytes are never hand-written in these tests, so a screen number that
+  drifts from the engine fails the test instead of drifting with it.
+  Live keyboard run, Windows ConPTY: `./dist/rackwars.exe --seed 1`, driven one
+  action per stdin write. Accepted keys in order: `t` `1` enter (road 1 to
+  Ashburn), `t` `2` enter (road 2 to West Texas), `b` `12` enter, `l` `r` `4576`
+  enter, four Stay closes (`e` enter, `ee` enter, `enter` enter, `e` enter - the
+  `e`, `enter` and letter aliases are all board bindings), `s` `12` enter,
+  `l` `r` `28734` enter, twenty-four further Stay closes, then `q`. Ctrl+C was
+  delivered separately to another instance of the same binary.
+Observed result:
+  The live run reproduces the recorded Phase 2 winning trace for seed 1 exactly.
+  Day 1 in The garage: cash $10,000, debt $20,000, net -$10,000, 3090 SLED ask
+  $1,756. Day 2 morning after the first travel: freight $250, interest $2,000,
+  cash $9,750, debt $22,000, panel receipt labelled `DAY 1 CLOSE`. Day 3, in
+  West Texas under `THE MERGE: GPUs ARE OVER`: 3090 SLED ask $327, bought 12 for
+  $3,924 (HOLDINGS shows `3090 SLED x12 avg $327`, slots 24/24), repaid $4,576,
+  leaving cash $1,000 and debt $19,624. Day 7: sold all 12 at bid $2,398 for
+  $28,776 gross - the status line read `Sold 12 3090 SLED for $28,776; you kept
+  $28,776; realized +$24,852`, which is the design's rule, not an omission: the
+  lender is paid by the credit check, not automatically out of every sale
+  (`TestCashCureHappensBeforeForcedSale`, `TestSaleProceedsRouteToLenderFirst`) -
+  then repaid $28,734 by hand, giving cash $1,042 and debt $0. Day 30 close
+  screen: `DAY 30: THE CLOSING AUCTION`, `CASH OUT: $1,042 (after the note is
+  settled)`, `RANK: Still independent`, and the receipt block `borrowed $0`,
+  `repaid $33,310`, `interest paid $13,310`, `trade profit +$24,852`, `best flip
+  +$24,852`, `peak net $1,042`, `freight paid $500`, `leases paid $0`, `forced
+  sales 0 units $0`, `days on road 2`. Every figure matches
+  `testdata/traces/trade-repay-win.golden.json` for seed 1, so TUI, engine and
+  the committed Phase 2 evidence agree, and the win needed no hosting income and
+  no campaign jackpot.
+  Replay: pressing `[r]` on the ending screen returned `Day 1/30` in The garage,
+  and that replayed run's `DAY 1 CLOSE` receipt (interest $2,000, cash $10,000,
+  debt $22,000) was identical to the first run's day 1, so the seed really does
+  re-deal the same market; `[n]` deals seed+1 and is pinned in-process by
+  `TestNewRunDealsANewSeed`.
+  Exit paths: `q` from the board -> process exit 0; Ctrl+C -> process exit 0 with
+  the terminal restored; `./dist/rackwars.exe --version` -> exit 0;
+  `echo hi | ./dist/rackwars.exe` -> `RACK WARS needs an interactive terminal.`
+  and exit 1. Chrome modes: `--ascii` painted with `-` rules, `>` marker and `~`
+  truncation, exit 0; `NO_COLOR=1 ./dist/rackwars.exe --no-color` painted and
+  exited 0; the byte-level color contract stays pinned by
+  `TestNoColorSetsNoForegroundOrBackground`, `TestColorFrameUsesStyleSequences`
+  and `TestFrameStaysWithinEscapeBudget`.
+  In-process Phase 3 behaviour tests, all engine-backed and comparing against
+  engine accessors rather than literals: `TestCommitNeedsConfirmation` (three
+  Enters close exactly one day), `TestMorningActionsCostNoDay`,
+  `TestOversizedQuantityIsRefusedWithTheExactGap` (the box stays open, the draft
+  survives, and the engine's shortfall is printed inside the box),
+  `TestBoxesCancelWithoutTouchingTheRun`, `TestDayCloseReceiptAppearsInPanel`,
+  `TestMorningReceiptNamesTheDayThePlayerWokeIn`,
+  `TestLenderPanelUsesTheDesignFormat`, `TestTravelBoxShowsKnownQuotes`,
+  `TestTravelNumberKeysPickTheRoad`, `TestTravelAndStayChargeWhatThePreviewPromised`,
+  `TestResizeNeverAdvancesRun`.
+  Why travel got number keys: inside this ConPTY channel an arrow key never
+  arrived - `t` ESC `[B` enter landed as `t` enter and travelled on the default
+  road - and only one line terminator per stdin write is delivered, so the
+  30-day run above was fed one action per write. A destination that can only be
+  reached with an arrow key is therefore not a destination the keyboard
+  guarantees, and the quantity box already offers letter shortcuts; roads are
+  now labelled `[1]`/`[2]` and a number picks the road outright, with an
+  out-of-range number refused inside the box (`There is no road number 9 from
+  here; the roads are numbered 1 to 2.`).
+  Defects found and fixed while producing this evidence:
+  1. `confirmBox` called `content.HeadlineFor(day+1)`, which returns nil past day
+     30, so the day-30 confirmation panicked - a crash every player would hit on
+     the last morning. Nil guard added, and the day-30 box now says `CLOSE THE
+     BOOKS?` with `close the run for good` as its footer.
+  2. The morning status line printed `rec.Day+1`; `Run.CommitDay` stamps a close
+     receipt with the morning that follows, so the line named a day the player
+     had not reached (board said day 13, line said 14). Fixed and pinned by
+     `TestMorningReceiptNamesTheDayThePlayerWokeIn`. The panel label keeps naming
+     the day that actually closed via `dayLines(closing, rec)`; the engine's own
+     stamping is untouched so the Phase 2 traces stay valid.
+  3. `.gitignore` listed a bare `rackwars`, which matched the `cmd/rackwars`
+     directory: the program's `main.go` had never been committed and the tree at
+     HEAD did not build. Patterns are now root-anchored (`/rackwars`,
+     `/rackwars.exe`) and `cmd/rackwars/main.go` is committed in 021c1c5. CI has
+     never executed, which is why a source tree that cannot build stayed hidden.
+Open gaps and next owner:
+  1. The Phase 3 exit gate asks for a full run in each required OS environment.
+     Only Windows has interactive evidence; the macOS Terminal.app run
+     (`./rackwars --seed 1`, plus `go test ./...` on darwin) is missing because
+     no macOS host is reachable here. The keyboard-only 30-day checklist row
+     therefore stays open and the gate is recorded incomplete.
+  2. The live run used a ~120-column terminal. The 80x24 minimum layout is
+     covered by tests (every layout test runs at 80x24), but a live narrow
+     keyboard run on a real window has still not been recorded.
+  3. Resizing remains verified only through synthesized `WindowSizeMsg`; no real
+     SIGWINCH/resize event has been observed by the running program.
+  4. `.github/workflows/ci.yml` has never executed (no remote, no Actions run
+     history); the next owner pushes and records the run URL.
+  5. The repossession ending has not been reached in a live terminal, only
+     through the scripted renderer (`TestScriptedKeyboardRunGetsRepossessedOnSeedOne`).
+     A live losing run is worth recording alongside the win.
+  6. Carried from Phase 2 for Phase 6: the trading win is real but thin - the
+     best of twelve seeds clears $1,042 after paying $13,310 of interest.
+Gate: incomplete
 ```
 
 Optional content remains outside the base-release gates.
