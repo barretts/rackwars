@@ -1,0 +1,59 @@
+{
+  "config": {
+    "Seed": 1,
+    "Products": [
+      "3090sled",
+      "4090",
+      "h100"
+    ],
+    "Markets": [
+      "garage",
+      "ashburn",
+      "westtexas"
+    ],
+    "Rules": {
+      "Hosting": false,
+      "Power": false,
+      "Heat": false,
+      "Encounters": false,
+      "Leases": false,
+      "Allocations": false
+    }
+  },
+  "actions": [
+    {
+      "kind": 2,
+      "amount": 10000
+    },
+    {
+      "kind": 0,
+      "product": "4090",
+      "qty": 8
+    },
+    {
+      "kind": 2,
+      "amount": 4468
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    }
+  ]
+}

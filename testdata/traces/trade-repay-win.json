@@ -1,0 +1,135 @@
+{
+  "config": {
+    "Seed": 1,
+    "Products": [
+      "3090sled",
+      "4090",
+      "h100"
+    ],
+    "Markets": [
+      "garage",
+      "ashburn",
+      "westtexas"
+    ],
+    "Rules": {
+      "Hosting": false,
+      "Power": false,
+      "Heat": false,
+      "Encounters": false,
+      "Leases": false,
+      "Allocations": false
+    }
+  },
+  "actions": [
+    {
+      "kind": 4,
+      "market": "ashburn"
+    },
+    {
+      "kind": 4,
+      "market": "westtexas"
+    },
+    {
+      "kind": 0,
+      "product": "3090sled",
+      "qty": 12
+    },
+    {
+      "kind": 3,
+      "amount": 4576
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 1,
+      "product": "3090sled",
+      "qty": 12
+    },
+    {
+      "kind": 3,
+      "amount": 28734
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 5
+    }
+  ]
+}

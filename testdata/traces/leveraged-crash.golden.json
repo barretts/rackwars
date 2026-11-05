@@ -1,0 +1,16 @@
+{
+  "seed": 1,
+  "policy": "leveraged",
+  "day": 8,
+  "cash": 0,
+  "debt": 32630,
+  "netWorth": -32630,
+  "endKind": 2,
+  "cashOut": -32630,
+  "interestPaid": 24897,
+  "borrowed": 14468,
+  "repaid": 0,
+  "forcedUnits": 8,
+  "forcedLoss": 942,
+  "actions": 10
+}

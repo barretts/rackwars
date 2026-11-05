@@ -1,0 +1,16 @@
+{
+  "seed": 1,
+  "policy": "trade-repay",
+  "day": 30,
+  "cash": 1042,
+  "debt": 0,
+  "netWorth": 1042,
+  "endKind": 1,
+  "cashOut": 1042,
+  "interestPaid": 13310,
+  "borrowed": 0,
+  "repaid": 33310,
+  "forcedUnits": 0,
+  "forcedLoss": 0,
+  "actions": 34
+}

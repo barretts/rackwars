@@ -1,0 +1,13 @@
+seed 1 day 8 garage cash $0 debt $32,630
+cast 3090sled,4090,h100 markets garage,ashburn,westtexas rules prototype
+d1  garage     borrow $10,000         cash $20,000 debt $30,000 net -$10,000 slots 0
+d1  garage     buy 4090 x8            cash $9,064 debt $30,000 net -$12,000 slots 8 cost $10,936
+d1  garage     borrow $4,468          cash $13,532 debt $34,468 net -$12,000 slots 8
+d2  garage     stay                   cash $13,532 debt $37,915 net -$7,151 slots 8 interest $3,447
+d3  garage     stay                   cash $8,821 debt $36,996 net -$14,183 slots 8 interest $3,792
+d4  garage     stay                   cash $5,833 debt $37,708 net -$16,459 slots 8 interest $3,700
+d5  garage     stay                   cash $0 debt $32,487 net -$27,222 slots 5 interest $3,771 forced 3
+d6  garage     stay                   cash $0 debt $35,736 net -$23,506 slots 5 interest $3,249
+d7  garage     stay                   cash $0 debt $33,640 net -$25,135 slots 3 interest $3,574 forced 2
+d8  garage     stay                   cash $0 debt $32,630 net -$32,630 slots 0 interest $3,364 forced 3
+over: repossessed cash-out -$32,630 rank Shoreline's new subsidiary
