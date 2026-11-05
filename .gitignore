@@ -1,0 +1,6 @@
+rackwars
+rackwars.exe
+dist/
+*.log
+coverage.out
+*.test

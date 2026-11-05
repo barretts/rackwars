@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        if: runner.os != 'Windows'
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      # The shipped binaries are built without cgo; the test job proves that
+      # still compiles on every OS we target.
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o dist/rackwars${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/rackwars
+
+      - name: test
+        run: go test ./... -count=1 -timeout 300s
+
+      # The race detector needs a C toolchain; macOS runners have one, Windows
+      # runners do not reliably provide one.
+      - name: test (race)
+        if: runner.os == 'macOS'
+        run: go test -race ./... -count=1 -timeout 300s
+
+      - name: version flag works without a terminal
+        run: dist/rackwars${{ runner.os == 'Windows' && '.exe' || '' }} --version
