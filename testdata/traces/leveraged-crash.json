@@ -27,12 +27,28 @@
     },
     {
       "kind": 0,
-      "product": "4090",
-      "qty": 8
+      "product": "h100",
+      "qty": 1
     },
     {
       "kind": 2,
-      "amount": 4468
+      "amount": 10224
+    },
+    {
+      "kind": 0,
+      "product": "4090",
+      "qty": 7
+    },
+    {
+      "kind": 2,
+      "amount": 3909
+    },
+    {
+      "kind": 5
+    },
+    {
+      "kind": 2,
+      "amount": 2816
     },
     {
       "kind": 5
@@ -50,7 +66,13 @@
       "kind": 5
     },
     {
-      "kind": 5
+      "kind": 2,
+      "amount": 5523
+    },
+    {
+      "kind": 0,
+      "product": "4090",
+      "qty": 1
     },
     {
       "kind": 5

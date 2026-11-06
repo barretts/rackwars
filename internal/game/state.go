@@ -162,9 +162,12 @@ func New(cfg Config) (*Run, error) {
 
 	r := &Run{cfg: cfg, camp: content.CampaignFor(cfg.Products)}
 	r.State = State{
-		Day:       1,
-		Market:    content.MarketID(home),
-		Cash:      10000,
+		Day:    1,
+		Market: content.MarketID(home),
+		// The owner's opening position: $30,000 in the account on a $20,000
+		// note with an empty garage - net worth +$10,000. Day 1 interest is
+		// the first bill; nobody starts the run digging out of a hole.
+		Cash:      30000,
 		Debt:      20000,
 		Owned:     make([]int, len(cfg.Products)),
 		CostBasis: make([]Money, len(cfg.Products)),

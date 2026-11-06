@@ -10,8 +10,10 @@ import (
 // play styles the design names - cautious trade-and-repay, legitimate hosting,
 // and risky import - each finish a full-rules run on day 30 with the note
 // settled and cash out, on the documented seeds below. These are the seeds the
-// sweep found across 1..40 (11 of 40 close, 29 repossess; every win is a seed
-// where all three styles clear, so no style wins on luck alone).
+// sweep found across 1..40. They stayed the pinned six after the owner opened
+// every run at $30,000 cash: that start carried all three styles to 40 of 40
+// closes and wins, so no style wins on luck alone and these six remain safe
+// representatives of the win list.
 //
 // The test is the record: a content or engine change that takes one of these
 // seeds off the win list must fail here and force a re-judgement, exactly like

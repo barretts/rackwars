@@ -3,14 +3,14 @@
   "policy": "leveraged",
   "day": 8,
   "cash": 0,
-  "debt": 32630,
-  "netWorth": -32630,
+  "debt": 30193,
+  "netWorth": -30193,
   "endKind": 2,
-  "cashOut": -32630,
-  "interestPaid": 24897,
-  "borrowed": 14468,
+  "cashOut": -30193,
+  "interestPaid": 34855,
+  "borrowed": 32472,
   "repaid": 0,
-  "forcedUnits": 8,
-  "forcedLoss": 942,
-  "actions": 10
+  "forcedUnits": 9,
+  "forcedLoss": 5338,
+  "actions": 15
 }

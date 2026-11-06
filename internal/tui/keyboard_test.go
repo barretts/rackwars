@@ -70,11 +70,24 @@ func productRow(p content.ProductID) int {
 }
 
 // keysFor translates one engine action into the keystrokes that produce it, given
-// the town the action happens in. This is how the scripted run below is built:
-// the headless policy and the keyboard drive the same engine through the same
+// the town the action happens in and where the board's arrow cursor currently
+// sits. The board cursor is cyclic and survives a box commit, a day close, and a
+// resume, so the script must row to the product from where the cursor actually
+// is, not from the top: keysFor reports the new row through sel, and every
+// scripted driver threads it across actions. Before the run finally drove rows
+// past the first, the encoder's row-0 assumption looked harmless; on an H100
+// follow-up buy it wrapped onto the 4090 and traded a different product than
+// the reference trace. This is how the scripted runs below are built: the
+// headless policy and the keyboard drive the same engine through the same
 // actions, so a difference between the two is a bug in the interface.
-func keysFor(from content.MarketID, a game.Action) string {
-	selectRow := strings.Repeat("\x1b[B", productRow(a.Product))
+func keysFor(from content.MarketID, a game.Action, sel *int) string {
+	rows := len(content.PrototypeProducts)
+	selectRow := ""
+	if a.Kind == game.ActBuy || a.Kind == game.ActSell {
+		target := productRow(a.Product)
+		selectRow = strings.Repeat("\x1b[B", (target-*sel+rows)%rows)
+		*sel = target
+	}
 	switch a.Kind {
 	case game.ActBuy:
 		return selectRow + "b" + fmt.Sprint(a.Qty) + "\r"
@@ -96,6 +109,39 @@ func keysFor(from content.MarketID, a game.Action) string {
 		return "e" + "\r"
 	}
 	return ""
+}
+
+// TestInProcessKeyboardScriptMatchesHeadless is the millisecond-scale pin for
+// the class of drift the row-0 encoder used to hide: the same engine is driven
+// twice, once headless and once through the board's keys in-process with the
+// cyclic cursor threaded, and the two must agree to the cent. The piped tests
+// below prove the same thing through a real render; this one fails fast and
+// names the action whose keystrokes stopped landing.
+func TestInProcessKeyboardScriptMatchesHeadless(t *testing.T) {
+	run, steps, err := sim.Play(sim.Prototype(1), sim.TradeRepay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := sizedModel(t, NewChrome(false, true), 1, 120, 30)
+	sel := 0
+	cur := content.Garage
+	for _, st := range steps {
+		if !st.OK {
+			continue
+		}
+		before := len(m.actions)
+		m = sendRaw(t, m, keysFor(cur, st.Action, &sel))
+		if len(m.actions) != before+1 {
+			t.Fatalf("action %v (%s day %d @ %s) did not land in-process: status %q",
+				st.Action, st.Action.Kind, st.Day, cur, m.status)
+		}
+		cur = st.Market
+	}
+	if m.run.State.End.Kind != game.EndClosed || m.run.State.End.CashOut != run.State.End.CashOut {
+		t.Fatalf("the in-process script ended %s with cash-out %s; the headless run ended %s with %s",
+			m.run.State.End.Kind, game.FormatMoney(m.run.State.End.CashOut),
+			run.State.End.Kind, game.FormatMoney(run.State.End.CashOut))
+	}
 }
 
 // TestScriptedKeyboardRunWinsOnSeedOne is the Phase 3 exit gate: a run driven only
@@ -146,11 +192,12 @@ func TestScriptedKeyboardRunWinsOnSeedOne(t *testing.T) {
 	// pick is found from the town the step started in: track it as the script walks.
 	var script strings.Builder
 	cur := content.Garage
+	sel := 0
 	for _, st := range steps {
 		if !st.OK {
 			continue
 		}
-		script.WriteString(keysFor(cur, st.Action))
+		script.WriteString(keysFor(cur, st.Action, &sel))
 		cur = st.Market
 	}
 	if _, err := pipeWrite.Write([]byte(script.String())); err != nil {
@@ -374,11 +421,12 @@ func TestScriptedKeyboardRunGetsRepossessedOnSeedOne(t *testing.T) {
 
 	var script strings.Builder
 	cur := content.Garage
+	sel := 0
 	for _, st := range steps {
 		if !st.OK {
 			continue
 		}
-		script.WriteString(keysFor(cur, st.Action))
+		script.WriteString(keysFor(cur, st.Action, &sel))
 		cur = st.Market
 	}
 	if _, err := pipeWrite.Write([]byte(script.String())); err != nil {

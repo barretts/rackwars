@@ -38,7 +38,7 @@ The player is a small operator trading a movable fleet, not a hyperscaler buildi
 
 ## Thirty-second rules
 
-- You start on day 1 with **$10,000 cash, $20,000 debt, an empty garage, and 30 days**.
+- You start on day 1 with **$30,000 cash, $20,000 debt, an empty garage, and 30 days** (net worth +$10,000 — the debt is the pressure, not the bank balance).
 - Buy, sell, borrow, repay, and inspect the board without advancing time.
 - End each day by **traveling** or **staying**. Stay to host, sit out a bad market, or cool down.
 - Travel consumes one day in the first release. The fleet earns nothing in transit.
@@ -201,7 +201,7 @@ Do not treat selling collateral as if the original borrowing limit stayed unchan
 
 The lender panel always shows current headroom, tomorrow's interest at the current balance, and a stress preview using a 50% fall in collateral bids. Paying down the note on rumor day must be a real defensive choice.
 
-Negative net worth alone does not end a run; you start there. An uncured credit breach does. No additional secret bankruptcy rule.
+Negative net worth does not end a run. An uncured credit breach does. No additional secret bankruptcy rule.
 
 ## Hosting: a reason to hold, not the whole game
 

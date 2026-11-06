@@ -217,8 +217,8 @@ func TestInitialRunIsSavable(t *testing.T) {
 	if got.State.Day != 1 || got.State.Market != content.Garage {
 		t.Fatalf("the fresh save is day %d in %s, want day 1 at the garage", got.State.Day, got.State.Market)
 	}
-	if got.State.Cash != 10000 || got.State.Debt != 20000 {
-		t.Fatalf("the fresh save holds %s cash and %s debt, want $10,000 and $20,000",
+	if got.State.Cash != 30000 || got.State.Debt != 20000 {
+		t.Fatalf("the fresh save holds %s cash and %s debt, want $30,000 and $20,000",
 			game.FormatMoney(got.State.Cash), game.FormatMoney(got.State.Debt))
 	}
 	if len(got.Trace.Actions) != 0 {

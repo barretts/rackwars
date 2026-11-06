@@ -2,15 +2,15 @@
   "seed": 1,
   "policy": "trade-repay",
   "day": 30,
-  "cash": 1042,
+  "cash": 64152,
   "debt": 0,
-  "netWorth": 1042,
+  "netWorth": 64152,
   "endKind": 1,
-  "cashOut": 1042,
-  "interestPaid": 13310,
+  "cashOut": 64152,
+  "interestPaid": 4200,
   "borrowed": 0,
-  "repaid": 33310,
+  "repaid": 24200,
   "forcedUnits": 0,
   "forcedLoss": 0,
-  "actions": 34
+  "actions": 36
 }

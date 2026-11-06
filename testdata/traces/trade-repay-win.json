@@ -36,7 +36,7 @@
     },
     {
       "kind": 3,
-      "amount": 4576
+      "amount": 24200
     },
     {
       "kind": 5
@@ -56,10 +56,6 @@
       "qty": 12
     },
     {
-      "kind": 3,
-      "amount": 28734
-    },
-    {
       "kind": 5
     },
     {
@@ -117,13 +113,28 @@
       "kind": 5
     },
     {
+      "kind": 0,
+      "product": "h100",
+      "qty": 1
+    },
+    {
       "kind": 5
+    },
+    {
+      "kind": 0,
+      "product": "h100",
+      "qty": 2
     },
     {
       "kind": 5
     },
     {
       "kind": 5
+    },
+    {
+      "kind": 1,
+      "product": "h100",
+      "qty": 3
     },
     {
       "kind": 5

@@ -740,4 +740,55 @@ Open gaps and next owner:
 Gate: incomplete
 ```
 
+## Addendum - opening-economy change (owner directive, 2026-11-06)
+
+```text
+Change: internal/game/state.go New() now opens every run at Cash 30000 on the
+unchanged 20000 note (was 10000/20000): fresh net worth is +$10,000 instead of
+-$10,000. Owner rationale: the negative opening had no reason; the debt is the
+pressure, the bank balance should not be a pre-dug hole. Credit rules are
+untouched - the unsecured floor is $30,000 and the ceiling is 50% of
+collateral above it, neither references opening cash, and every credit
+assertion in internal/game passed unmodified. RACK-WARS.md carries the new
+opening line; the Phases 1-5 evidence blocks keep their original numbers as
+history and are not rewritten here.
+
+Blast radius and fixes:
+  1. Tests that pinned the old literals were updated to the new position:
+     internal/save (fresh-run header wants $30,000), internal/tui save tests
+     (fresh cash 30000; borrow-5000 autosave frame now $35,000), and the
+     scripted shell test's over-limit probe types 24 4090s - the deliberate
+     cash-short refusal - because 12 became genuinely affordable at $30,000.
+  2. Latent test-encoder defect found and fixed (the game itself was innocent,
+     proven by an in-process replay of the exact reference position): the
+     keyboard script builder keysFor assumed the board arrow cursor parked at
+     row 0 before every buy/sell, but the board cursor is cyclic
+     (m.sel = wrap(...)) and survives box commits and day closes. Every
+     old-economy reference trace traded only row 0, so the assumption never
+     moved; the new economy produced back-to-back row-2 H100 actions and the
+     second encoder walk wrapped 2 -> 0 -> 1 and bought a 4090 instead,
+     diverging from the reference trace mid-run. keysFor now threads the
+     cursor position and walks the wrap correctly; the interrupted-resume
+     test resets it at the cut because the resumed process legitimately
+     restarts with the cursor on top (adoptRun). New fast pin:
+     TestInProcessKeyboardScriptMatchesHeadless drives the whole reference
+     trace in-process through the same encoder and must agree to the cent.
+  3. The recorded prototype traces (testdata/traces) re-recorded on the new
+     economy by the sim gate tests, as designed; TestRecordedTracesStillReplay
+     re-validates them. The seed-1 prototype trade-repay win moved $1,042 ->
+     $64,152 cash-out on the identical 36-action line.
+  4. The 1..40 full-rules sweep fact in internal/sim/full_gate_test.go is
+     superseded: at $30,000 all three archetypes close AND win on all 40
+     seeds (was 11/40 close). The pinned six seeds {5,16,18,25,27,33} still
+     pass unchanged as representatives; the comment records the new sweep.
+     Difficulty re-balance is the owner's call, not silently retuned here.
+  5. Live smoke (ConPTY harness, same caveats as Phase 5): rebuilt exe
+     `rackwars 0.1.0-phase5.1`, fresh seed-1 full board paints
+     "$30,000 cash  $20,000 debt  net $10,000  heat 0  slots 0/8" under the
+     [five markets] header with Shoreline Credit ceiling $30,000 / headroom
+     $10,000 / tomorrow $2,000 interest. `go vet`, `go test ./... -count=1`
+     and `go test -race -timeout 300s ./... -count=1` all green.
+Gate: unchanged - still incomplete for the same open gaps as Phase 5.
+```
+
 Optional content remains outside the base-release gates.

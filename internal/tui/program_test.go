@@ -136,14 +136,14 @@ func TestScriptedKeysDriveTheShell(t *testing.T) {
 		return strings.Contains(s, "quantity:")
 	})
 
-	send("12")
+	send("24")
 	mustWait("typed digits did not reach the box", func(s string) bool {
-		return strings.Contains(s, "quantity: 12")
+		return strings.Contains(s, "quantity: 24")
 	})
 
-	send("\r") // over the engine's limit: the box stays open and names the gap
+	send("\r") // over the wallet: the box stays open and names the cash gap
 	mustWait("over-limit quantity was not refused inside the box", func(s string) bool {
-		return strings.Contains(s, "quantity: 12") && strings.Contains(s, "short ")
+		return strings.Contains(s, "quantity: 24") && strings.Contains(s, "short ")
 	})
 
 	// q is a shortcut on the board, never while the quantity box has focus.

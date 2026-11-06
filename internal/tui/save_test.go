@@ -85,12 +85,13 @@ func savedAt(t *testing.T, store *save.Store, n int) (Model, []game.Step, []game
 	}
 	m := sizedModel(t, NewChrome(false, true), 1, 120, 30).WithStore(SaveTarget{Store: store, RunID: testRunID})
 	cur := content.Garage
+	sel := 0
 	done := 0
 	for _, st := range steps {
 		if !st.OK || done >= n {
 			continue
 		}
-		m = sendRaw(t, m, keysFor(cur, st.Action))
+		m = sendRaw(t, m, keysFor(cur, st.Action, &sel))
 		done++
 		cur = st.Market
 	}
@@ -216,7 +217,7 @@ func TestFailedAutosaveIsVisibleAndRetryable(t *testing.T) {
 		t.Errorf("the failure sentence offers no retry: %q", statusLineOf(m))
 	}
 	// The run is untouched: a failed write must never damage the game.
-	if m.run.State.Debt != 25000 || m.run.State.Cash != 15000 {
+	if m.run.State.Debt != 25000 || m.run.State.Cash != 35000 {
 		t.Errorf("a failed save changed the run: %+v", m.run.State)
 	}
 	// [S] retries and, still failing, does not end the run.
@@ -465,7 +466,7 @@ func TestStartingASeedOverKeepsTheOldRun(t *testing.T) {
 		t.Fatalf("OfferContinue found nothing")
 	}
 	fresh := send(list, "n")
-	if fresh.run.State.Day != 1 || fresh.run.State.Cash != 10000 {
+	if fresh.run.State.Day != 1 || fresh.run.State.Cash != 30000 {
 		t.Fatalf("the new deal is not a fresh run: %+v", fresh.run.State)
 	}
 	fresh = send(fresh, "l", "5", "0", "0", "0", "enter")
@@ -527,11 +528,20 @@ func TestInterruptedKeyboardRunCarriesOnToTheSameEnding(t *testing.T) {
 	}
 	var script []scripted
 	cur := content.Garage
+	sel := 0
+	idx := 0
 	for _, st := range steps {
 		if !st.OK {
 			continue
 		}
-		script = append(script, scripted{keys: keysFor(cur, st.Action)})
+		if idx == cut {
+			// The second half runs in a fresh process, and resume puts the
+			// board cursor back at the top row: its keystrokes are written
+			// from row 0, not from wherever the first process left it.
+			sel = 0
+		}
+		script = append(script, scripted{keys: keysFor(cur, st.Action, &sel)})
+		idx++
 		cur = st.Market
 	}
 
