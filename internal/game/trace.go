@@ -87,7 +87,19 @@ func DecodeTrace(b []byte) (Trace, error) {
 			if r := newRunForCheck(t.Config); r.MarketIndex(a.Market) < 0 {
 				return Trace{}, fmt.Errorf("action %d names unknown market %q", i, a.Market)
 			}
-		case ActBorrow, ActRepay, ActStay:
+		case ActStay:
+			if a.Mode < StayAuto || a.Mode > StayCurtail {
+				return Trace{}, fmt.Errorf("action %d names unknown stay mode %d", i, a.Mode)
+			}
+			if len(a.Powered) > 0 && len(a.Powered) != len(t.Config.Products) {
+				return Trace{}, fmt.Errorf("action %d powered subset has %d entries, cast has %d", i, len(a.Powered), len(t.Config.Products))
+			}
+		case ActEncounter:
+			if a.Resp < EncPay || a.Resp > EncContest {
+				return Trace{}, fmt.Errorf("action %d names unknown encounter response %d", i, a.Resp)
+			}
+		case ActAllocation:
+		case ActBorrow, ActRepay:
 		default:
 			return Trace{}, fmt.Errorf("action %d has unknown kind %d", i, a.Kind)
 		}
@@ -185,6 +197,13 @@ func formatStep(r *Run, s Step) string {
 		moves = fmt.Sprintf("travel -> %s", s.Action.Market)
 	case ActStay:
 		moves = "stay"
+		if s.Action.Mode != StayAuto {
+			moves += " (" + s.Action.Mode.String() + ")"
+		}
+	case ActAllocation:
+		moves = fmt.Sprintf("allocation x%d", s.Action.Qty)
+	case ActEncounter:
+		moves = "encounter:" + s.Action.Resp.String()
 	}
 	state := ""
 	if s.OK {
@@ -195,6 +214,30 @@ func formatStep(r *Run, s Step) string {
 		}
 		if s.Receipt.Freight > 0 {
 			state += " freight " + FormatMoney(s.Receipt.Freight)
+		}
+		if s.Receipt.Lease > 0 {
+			state += " lease " + FormatMoney(s.Receipt.Lease)
+		}
+		if s.Receipt.Hosted > 0 {
+			state += " hosted " + FormatMoney(s.Receipt.Hosted)
+		}
+		if s.Receipt.Electricity > 0 {
+			state += " elec -" + FormatMoney(s.Receipt.Electricity)
+		}
+		if s.Receipt.Curtail > 0 {
+			state += " curtail +" + FormatMoney(s.Receipt.Curtail)
+		}
+		if s.Receipt.Clawback > 0 {
+			state += " clawback -" + FormatMoney(s.Receipt.Clawback)
+		}
+		if s.Receipt.Fine > 0 {
+			state += " fine -" + FormatMoney(s.Receipt.Fine)
+		}
+		if s.Receipt.Surrendered != "" {
+			state += " surrendered " + string(s.Receipt.Surrendered)
+		}
+		if s.Receipt.Pending {
+			state += " [stopped for an encounter]"
 		}
 		if len(s.Receipt.Forced) > 0 {
 			state += fmt.Sprintf(" forced %d", len(s.Receipt.Forced))

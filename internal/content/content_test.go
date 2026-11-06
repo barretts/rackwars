@@ -209,11 +209,16 @@ func TestCampaignForPrunesForeignProducts(t *testing.T) {
 			}
 		}
 	}
-	// A consumer-only cast still gets the day and its headline, just without
-	// effects it cannot price.
+	// A consumer-only cast still gets the day and its headline. It keeps only
+	// the effects it can actually price: the CheapSeek enterprise collapse is
+	// pruned, while the CheapSeek consumer hosting window survives, narrowed
+	// to the consumer cards in this cast.
 	camp2 := CampaignFor([]ProductID{Sled3090, Card4090})
-	if h := camp2[25]; h.Day != 26 || h.Text == "" || len(h.Effects) != 0 {
-		t.Fatalf("day 26 row for a consumer-only cast = %+v, want the text with no effects", h)
+	if h := camp2[25]; h.Day != 26 || h.Text == "" || len(h.Effects) != 1 {
+		t.Fatalf("day 26 row for a consumer-only cast = %+v, want the text and exactly the consumer hosting window", h)
+	} else if e := h.Effects[0]; e.Kind != EffectHosting || len(e.Products) != 2 ||
+		e.Products[0] != Sled3090 || e.Products[1] != Card4090 {
+		t.Fatalf("day 26 survivor = %+v, want the consumer hosting window narrowed to this cast", e)
 	}
 }
 

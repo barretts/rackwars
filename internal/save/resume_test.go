@@ -201,13 +201,14 @@ func TestSaveThatNamesAnUnknownTownIsRefused(t *testing.T) {
 }
 
 // TestPendingChoiceIsNeverSkipped keeps the plan's requirement that a save
-// waiting on a choice cannot be resumed past it. The trading prototype has no
-// encounters, so a save naming one comes from a ruleset this build cannot show.
+// waiting on a choice cannot be resumed past it. The one pending kind this
+// build can show is an encounter; a save naming any other waits on something
+// this build cannot render.
 func TestPendingChoiceIsNeverSkipped(t *testing.T) {
 	s := testStore(t)
 	run, accepted := playRun(t, sampleActions())
 	f := Of(run, accepted, s.Engine)
-	f.Pending = "encounter:the-fire"
+	f.Pending = "timecapsule:the-fire"
 	buf, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		t.Fatalf("encode: %v", err)

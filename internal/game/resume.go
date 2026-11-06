@@ -77,6 +77,42 @@ func Resume(cfg Config, st State) (*Run, error) {
 	if st.Heat < 0 {
 		return nil, fmt.Errorf("heat %d is negative", st.Heat)
 	}
+	if st.Heat > 100 {
+		return nil, fmt.Errorf("heat %d is above the meter's ceiling of 100", st.Heat)
+	}
+	if st.LastHostEnt < 0 {
+		return nil, fmt.Errorf("last night's enterprise hosting of %s is negative", FormatMoney(st.LastHostEnt))
+	}
+	if st.AllocStock < 0 || st.AllocOpenDay < 0 {
+		return nil, fmt.Errorf("allocation counters are negative (stock %d, opened day %d)", st.AllocStock, st.AllocOpenDay)
+	}
+	if st.AllocTaken && st.AllocStock != 0 {
+		return nil, fmt.Errorf("the run already took an allocation yet %d units remain", st.AllocStock)
+	}
+	if st.PendingEncounter != nil {
+		e := st.PendingEncounter
+		if st.Over != EndOpen {
+			return nil, fmt.Errorf("state is over while a police beat is still pending")
+		}
+		if st.PendingKind != ActTravel && st.PendingKind != ActStay {
+			return nil, fmt.Errorf("pending encounter was reached by a %s, which cannot stop for one", st.PendingKind)
+		}
+		if st.PendingRec == nil {
+			return nil, fmt.Errorf("pending encounter has no receipt to continue")
+		}
+		if e.Kind != EncounterCustoms && e.Kind != EncounterSerial && e.Kind != EncounterNoise {
+			return nil, fmt.Errorf("pending encounter has unknown kind %q", e.Kind)
+		}
+		if e.Day < 1 || e.Day > content.DayCount {
+			return nil, fmt.Errorf("pending encounter claims day %d", e.Day)
+		}
+		if e.Fine < 0 || e.Chance < 0 || e.Chance > 100 {
+			return nil, fmt.Errorf("pending encounter carries impossible terms (fine %s, contest %d%%)", FormatMoney(e.Fine), e.Chance)
+		}
+		if e.Kind != EncounterNoise && (e.Named == "" || runProductIndex(cfg, e.Named) < 0) {
+			return nil, fmt.Errorf("pending encounter names %q, which the saved cast does not contain", e.Named)
+		}
+	}
 	// Capacity is a rule of the active lease, and leases are switched off in
 	// every ruleset that has a save format so far; while leases are off the
 	// town's own storage is the limit, so a state that overflows it cannot have
@@ -126,6 +162,16 @@ func runMarketIndex(cfg Config, m content.MarketID) int {
 	return -1
 }
 
+// runProductIndex is the same lookup for cards, usable before a Run exists.
+func runProductIndex(cfg Config, p content.ProductID) int {
+	for i, id := range cfg.Products {
+		if id == p {
+			return i
+		}
+	}
+	return -1
+}
+
 func copyState(st State) State {
 	out := st
 	out.Owned = append([]int(nil), st.Owned...)
@@ -133,5 +179,16 @@ func copyState(st State) State {
 	out.Stock = append([]int(nil), st.Stock...)
 	out.Quotes = append([]Quote(nil), st.Quotes...)
 	out.SeenDay = append([]int(nil), st.SeenDay...)
+	// A pending encounter is the day in progress; the live run must own its
+	// copy, so clearing or continuing it cannot write back through the save
+	// the caller still holds.
+	if out.PendingEncounter != nil {
+		e := *out.PendingEncounter
+		out.PendingEncounter = &e
+	}
+	if out.PendingRec != nil {
+		rec := *out.PendingRec
+		out.PendingRec = &rec
+	}
 	return out
 }

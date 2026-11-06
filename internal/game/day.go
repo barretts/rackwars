@@ -60,14 +60,11 @@ func (r *Run) PreviewTravel(to content.MarketID) TravelPreview {
 	} else {
 		pv.ArrivalNote = "never traded here; prices unknown until arrival"
 	}
-	if r.cfg.Rules.Encounters && (r.State.Market == content.Huaqiangbei || to == content.Huaqiangbei) {
-		chance := 5
-		if r.State.Heat >= 60 {
-			chance = 25
-		}
-		if pv.OccupiedSlots > 0 {
-			pv.RiskNote = "customs risk " + itoa(chance) + "% on this shipment"
-		}
+	// Customs checks departures from Huaqiangbei carrying GPUs — arriving is
+	// shopping, and the empty coat is exempt by rule. The number shown here
+	// is the exact number the roll uses (customsRoll).
+	if r.cfg.Rules.Encounters && r.State.Market == content.Huaqiangbei && to != content.Huaqiangbei && pv.OccupiedSlots > 0 {
+		pv.RiskNote = "customs risk " + itoa(r.customsRoll()) + "% on this shipment"
 	}
 
 	if pv.OccupiedSlots > dest.Slots {
@@ -79,45 +76,166 @@ func (r *Run) PreviewTravel(to content.MarketID) TravelPreview {
 	return pv
 }
 
-// StayPreview is the cost of spending the day where the player is.
+// StayPreview is the itemized price of spending a night where you are:
+// lease, meter, hosting, curtailment, invoice review, interest — every number
+// the settlement will use, computed by the same functions before the player
+// commits, so preview and receipt are one arithmetic. A preview that could
+// drift from settlement would be the oldest con in datacenter history.
 type StayPreview struct {
 	Market    content.MarketID `json:"market"`
+	Mode      StayMode         `json:"mode"`
 	Lease     Money            `json:"lease"`
+	Electric  Money            `json:"electric"`
 	Hosted    Money            `json:"hosted"`
+	Curtail   Money            `json:"curtail"`
+	Clawback  Money            `json:"clawback"`
 	Interest  Money            `json:"interest"`
-	Heat      int              `json:"heat"`
+	Powered   []int            `json:"powered,omitempty"`
+	PowerKW   int64            `json:"powerKw100"`
+	PowerCap  int64            `json:"powerCapKw100"`
+	Eligible  bool             `json:"eligible"`
+	Clean     bool             `json:"clean"`
 	CashAfter Money            `json:"cashAfter"`
 	DebtAfter Money            `json:"debtAfter"`
+	Heat      int              `json:"heat"`
+	Reason    Reason           `json:"reason,omitempty"`
 	Valid     bool             `json:"valid"`
 }
 
-// PreviewStay shows the net cost of a stay. Hosting is switched off in the
-// trading prototype, so a stay costs the site lease and nothing else, and earns
-// nothing.
-func (r *Run) PreviewStay() StayPreview {
-	pv := StayPreview{Market: r.State.Market, Interest: ceil10(r.State.Debt), Heat: r.State.Heat, Valid: r.State.Over == EndOpen}
-	if r.cfg.Rules.Leases {
-		pv.Lease = Money(content.MarketOf(r.State.Market).DailyLease)
+// stayPlan resolves the night: which GPUs run, whether the grid operator's
+// money is being taken, and why a plan is illegal. One plan function feeds
+// both the preview and the settlement, so neither can drift from the other,
+// and an explicit powered subset is validated here, once, in one place.
+func (r *Run) stayPlan(mode StayMode, powered []int) (chosen []int, curtail Money, reason Reason) {
+	m := r.State.Market
+	site := content.MarketOf(m).Site
+	elig := r.hostEligible(m)
+	np := len(r.cfg.Products)
+	chosen = make([]int, np)
+	switch mode {
+	case StayAuto:
+		if elig {
+			chosen = r.bestPowered(r.State.Day, m)
+		}
+	case StayPowerOff:
+	case StayCurtail:
+		if !site || !r.cfg.Rules.Hosting || !r.cfg.Rules.Power {
+			return nil, 0, ReasonCurtailUnavailable
+		}
+		offer, ok := r.curtailOffer(r.State.Day, m)
+		if !ok {
+			return nil, 0, ReasonCurtailUnavailable
+		}
+		curtail = offer
+	default:
+		return nil, 0, ReasonBadQuantity
 	}
-	pv.CashAfter = r.State.Cash - pv.Lease + pv.Hosted
-	pv.DebtAfter = r.State.Debt + pv.Interest
+	if len(powered) > 0 {
+		// An explicit subset is allowed only where hosting lives, and never
+		// beside curtailment: the operator pays for a switched-off meter, not
+		// for a different packing puzzle.
+		if mode == StayCurtail || !elig || len(powered) != np {
+			return nil, 0, ReasonBadQuantity
+		}
+		for pi, n := range powered {
+			if n < 0 || n > r.State.Owned[pi] {
+				return nil, 0, ReasonBadQuantity
+			}
+		}
+		if content.MarketOf(m).PowerKW > 0 && poweredKW100(r.cfg.Products, powered) > content.MarketOf(m).PowerKW {
+			return nil, 0, ReasonPowerOver
+		}
+		chosen = powered
+	}
+	return chosen, curtail, ReasonOK
+}
+
+// PreviewStay prices a default (host-the-best-that-fits) night. With prototype
+// rules every new number is zero and the old columns hold: a stay at the free
+// garage costs nothing and earns nothing, exactly as the recorded traces show.
+// Mode-aware callers pass the exact action they will commit.
+func (r *Run) PreviewStay() StayPreview {
+	return r.PreviewStayMode(StayAuto, nil)
+}
+
+func (r *Run) PreviewStayMode(mode StayMode, powered []int) StayPreview {
+	m := r.State.Market
+	pv := StayPreview{Market: m, Mode: mode, Heat: r.State.Heat, Reason: ReasonRunOver}
+	if r.State.Over != EndOpen {
+		return pv
+	}
+	if r.State.PendingEncounter != nil {
+		pv.Reason = ReasonEncounterPending
+		return pv
+	}
+	if r.cfg.Rules.Leases {
+		pv.Lease = Money(content.MarketOf(m).DailyLease)
+	}
+	chosen, curtail, reason := r.stayPlan(mode, powered)
+	if reason != ReasonOK {
+		pv.Reason = reason
+		return pv
+	}
+	pv.Curtail = curtail
+	pv.Powered = chosen
+	pv.PowerKW = poweredKW100(r.cfg.Products, chosen)
+	pv.PowerCap = content.MarketOf(m).PowerKW
+	pv.Eligible = r.hostEligible(m)
+	pv.Clean = r.State.Heat < 60
+	pv.Electric = elecCostDollars(pv.PowerKW, content.MarketOf(m).ElecCentsPerKWh)
+	pv.Hosted, _ = r.hostNight(r.State.Day, m, chosen)
+	pv.Clawback = r.clawbackDue()
+	// Settlement order, walked here too: credits and charges land first; an
+	// uncovered charge becomes debt; interest is then struck once on the
+	// grown debt. So debt-after here is debt-after on the receipt.
+	net := pv.Hosted + pv.Curtail - pv.Lease - pv.Electric - pv.Clawback
+	cash := r.State.Cash + net
+	debt := r.State.Debt
+	if cash < 0 {
+		debt -= cash
+		cash = 0
+	}
+	pv.Interest = ceil10(debt)
+	pv.CashAfter, pv.DebtAfter = cash, debt+pv.Interest
+	pv.Valid = true
 	return pv
+}
+
+// clawbackDue is today's invoice review: if yesterday's hosting paid out on
+// the affected contract, the reinterpretation takes its stated share, capped.
+// The cap is what keeps a reinterpreted contract a haircut, not a second rent.
+func (r *Run) clawbackDue() Money {
+	pct, cap, ok := r.clawbackActive(r.State.Day)
+	if !ok || r.State.LastHostEnt <= 0 {
+		return 0
+	}
+	cut := r.State.LastHostEnt * pct / 100
+	if cut > cap {
+		cut = cap
+	}
+	return cut
 }
 
 // CommitDay is the only way time moves. Travel and Stay each consume exactly
 // one day, and the order of operations below is the authoritative one from the
-// design: lock the action and its displayed costs, resolve travel or the stay,
-// resolve at most one encounter, charge operating costs and accrue interest
-// once, then either close the run or advance and run the credit check.
+// design: lock the action and its displayed costs, resolve travel or the stay
+// (hosting pays out here, before any police beat can), resolve at most one
+// encounter — which may pause the calendar before the rest of the day exists —
+// then accrue interest once, and either close the run or advance and run the
+// credit check.
 func (r *Run) CommitDay(a Action) (Receipt, Result) {
 	if r.State.Over != EndOpen {
 		return Receipt{}, Result{Reason: ReasonRunOver}
+	}
+	if r.State.PendingEncounter != nil {
+		return Receipt{}, Result{Reason: ReasonEncounterPending}
 	}
 	if a.Kind != ActTravel && a.Kind != ActStay {
 		return Receipt{}, Result{Reason: ReasonBadQuantity}
 	}
 
 	rec := Receipt{Kind: a.Kind, Day: r.State.Day, DebtBefore: r.State.Debt}
+	from := r.State.Market
 
 	if a.Kind == ActTravel {
 		pv := r.PreviewTravel(a.Market)
@@ -127,9 +245,18 @@ func (r *Run) CommitDay(a Action) (Receipt, Result) {
 		rec.Freight = pv.Freight
 		rec.Market = a.Market
 		rec.MarketName = content.MarketOf(a.Market).Name
+		// An invoice review catches up with players on the road too: the
+		// counterparty reinterprets yesterday's hosting contract wherever
+		// yesterday happened, and travel does not outrun today's letter.
+		rec.Clawback = r.clawbackDue()
 		r.State.Cash -= pv.Freight
 		r.State.Stats.FreightPaid += pv.Freight
 		r.State.Stats.TravelDays++
+		if rec.Clawback > 0 {
+			r.State.Cash -= rec.Clawback
+			r.State.Stats.ClawbackPaid += rec.Clawback
+		}
+		r.State.LastHostEnt = 0 // the review window over last night closes
 		// An uncovered charge becomes debt before the credit check rather than
 		// being refused mid-day.
 		if r.State.Cash < 0 {
@@ -138,18 +265,35 @@ func (r *Run) CommitDay(a Action) (Receipt, Result) {
 		}
 		r.State.Market = a.Market
 	} else {
-		pv := r.PreviewStay()
+		pv := r.PreviewStayMode(a.Mode, a.Powered)
+		if !pv.Valid {
+			return Receipt{}, Result{Reason: pv.Reason}
+		}
 		rec.Lease = pv.Lease
 		rec.Hosted = pv.Hosted
+		rec.Electricity = pv.Electric
+		rec.Curtail = pv.Curtail
+		rec.Clawback = pv.Clawback
+		rec.Powered = pv.Powered
 		rec.MarketName = content.MarketOf(r.State.Market).Name
-		if r.cfg.Rules.Leases {
-			r.State.Cash -= pv.Lease
-			r.State.Stats.LeasePaid += pv.Lease
+		// Credits first, then charges; the preview already priced this exact
+		// net, and the numbers below are the preview's, not a recomputation
+		// that could drift.
+		r.State.Cash += pv.Hosted + pv.Curtail
+		r.State.Cash -= pv.Lease + pv.Electric + pv.Clawback
+		r.State.Stats.LeasePaid += pv.Lease
+		r.State.Stats.PowerCost += pv.Electric
+		r.State.Stats.HostingIncome += pv.Hosted
+		if pv.Curtail > 0 {
+			r.State.Stats.CurtailIncome += pv.Curtail
 		}
-		if pv.Hosted > 0 {
-			r.State.Cash += pv.Hosted
-			r.State.Stats.HostingIncome += pv.Hosted
+		if rec.Clawback > 0 {
+			r.State.Stats.ClawbackPaid += rec.Clawback
 		}
+		// The clawback reads last night's number, so the review window is
+		// stamped out only after the bill has been written.
+		_, ent := r.hostNight(r.State.Day, r.State.Market, pv.Powered)
+		r.State.LastHostEnt = ent
 		r.State.Stats.StayDays++
 		if r.State.Cash < 0 {
 			r.State.Debt += -r.State.Cash
@@ -157,7 +301,7 @@ func (r *Run) CommitDay(a Action) (Receipt, Result) {
 		}
 		if r.cfg.Rules.Heat {
 			// A quiet stay with the GPUs off cools the meter; hosting cools
-			// less. Travel does not cool anything.
+			// less because the fans never stopped. Travel does not cool.
 			cool := 10
 			if pv.Hosted > 0 {
 				cool = 5
@@ -166,9 +310,41 @@ func (r *Run) CommitDay(a Action) (Receipt, Result) {
 		}
 	}
 
-	// Encounters would resolve here, at most one per day. Switched off in the
-	// trading prototype, so nothing happens and no hidden roll is made.
+	// At most one police beat per day, resolved after the stay pays out and
+	// before interest: the calendar stops here until the player answers.
+	if e := r.rollEncounter(a, from); e != nil {
+		r.State.PendingEncounter = e
+		r.State.PendingKind = a.Kind
+		rec.Pending = true
+		r.State.PendingRec = &rec
+		return rec, Result{OK: true, PendingEncounter: true}
+	}
+	return r.dayTail(rec)
+}
 
+// ResolveEncounter answers the pending police beat and finishes the day the
+// paused CommitDay started: outcome, then interest, then the close or the
+// advance. Reloading cannot reroll the stop: the outcome was drawn at trigger
+// time and lives in the save.
+func (r *Run) ResolveEncounter(resp EncounterResponse) (Receipt, Result) {
+	if r.State.Over != EndOpen {
+		return Receipt{}, Result{Reason: ReasonRunOver}
+	}
+	e := r.State.PendingEncounter
+	if e == nil || r.State.PendingRec == nil {
+		return Receipt{}, Result{Reason: ReasonNoEncounter}
+	}
+	rec := r.resolveEncounter(*r.State.PendingRec, e, resp)
+	r.State.PendingEncounter = nil
+	r.State.PendingKind = 0
+	r.State.PendingRec = nil
+	return r.dayTail(rec)
+}
+
+// dayTail is the half of the day an encounter was allowed to interrupt:
+// interest exactly once on whatever the debt has become, then the day-30
+// close or the advance with its headline, market refresh, and credit check.
+func (r *Run) dayTail(rec Receipt) (Receipt, Result) {
 	// Interest accrues exactly once per elapsed day, after any charge that had
 	// to become debt.
 	interest := ceil10(r.State.Debt)

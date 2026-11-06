@@ -25,6 +25,9 @@ Flags:
   --seed N     deal a specific market (default 1). The same seed always deals the
                same market, so a bug report can be re-created exactly. A finished
                run shows its seed and offers to replay it.
+  --prototype  play the three-town trading prototype: the phase-3 economy with no
+               hosting, allocation, or checkpoints. The default game is the full
+               five-market base game.
   --save-dir PATH  use this folder instead of the user configuration directory
   --no-color   draw without color (NO_COLOR does the same)
   --ascii      draw with ASCII glyphs only
@@ -43,6 +46,7 @@ func main() {
 	ascii := fs.Bool("ascii", false, "draw with ASCII glyphs only")
 	saveDir := fs.String("save-dir", "", "save folder override")
 	seed := fs.Uint64("seed", 1, "deal a specific market")
+	prototype := fs.Bool("prototype", false, "play the three-town trading prototype instead of the full game")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -79,7 +83,12 @@ func main() {
 	}
 
 	colorOn := !*noColor && os.Getenv("NO_COLOR") == ""
-	model, err := tui.NewRun(tui.NewChrome(colorOn, *ascii), *seed)
+	chrome := tui.NewChrome(colorOn, *ascii)
+	newGame := tui.NewFullRun
+	if *prototype {
+		newGame = tui.NewRun
+	}
+	model, err := newGame(chrome, *seed)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rackwars: cannot start a run:", err)
 		os.Exit(1)

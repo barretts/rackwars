@@ -571,3 +571,220 @@ func TestUnsupportedVersionsAreRefused(t *testing.T) {
 		})
 	}
 }
+
+// --- Phase 5: the version 1 migration and pending encounters ---
+
+// TestVersionOneSaveMigratesOnLoad forges a genuine v1 header — schema 1,
+// prototype-1, campaign-1 — over an authentic prototype state, and requires
+// the load to carry it forward: the run must resume, play on, and be written
+// back once as a v2 file.
+func TestVersionOneSaveMigratesOnLoad(t *testing.T) {
+	s := testStore(t)
+	run, accepted := playRun(t, sampleActions())
+	f := Of(run, accepted, s.Engine)
+	f.Schema, f.RulesVersion, f.Content = v1Schema, v1Engine, v1Content
+	path := mustPath(t, s, "v1")
+	b, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Load("v1")
+	if err != nil {
+		t.Fatalf("v1 save refused: %v", err)
+	}
+	if got.Schema != SchemaVersion || got.RulesVersion != EngineVersion || got.Content != ContentVersion {
+		t.Fatalf("migrated header = (%d %s %s), want the current triple", got.Schema, got.RulesVersion, got.Content)
+	}
+	moved, err := got.Run()
+	if err != nil {
+		t.Fatalf("migrated run: %v", err)
+	}
+	if _, res := moved.Apply(game.Action{Kind: game.ActStay}); !res.OK {
+		t.Fatalf("migrated run cannot play on: %s", res.Reason)
+	}
+	// The forward write: the next save must be v2 on disk, not a re-labelled v1.
+	lock, err := s.Hold("v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Release() }()
+	if err := s.Save("v1", got, lock); err != nil {
+		t.Fatal(err)
+	}
+	back, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header struct {
+		Schema       int    `json:"schemaVersion"`
+		RulesVersion string `json:"rulesVersion"`
+	}
+	if err := json.Unmarshal(back, &header); err != nil {
+		t.Fatal(err)
+	}
+	if header.Schema != SchemaVersion || header.RulesVersion != EngineVersion {
+		t.Fatalf("forward write left (%d %s) on disk", header.Schema, header.RulesVersion)
+	}
+}
+
+// TestHalfMigratedV1IsRefused: the v1 triple is a fact about the file, not a
+// vibe. A file that only changed some of the header is unknown, not old.
+func TestHalfMigratedV1IsRefused(t *testing.T) {
+	r, actions := playRun(t, nil)
+	f := Of(r, actions, "test")
+	f.Schema, f.Content = v1Schema, v1Content // keeps the current engine name
+	s := testStore(t)
+	path, _ := s.Path("half")
+	b, _ := json.Marshal(f)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadErr(s, "half"); err == nil {
+		t.Fatal("a mixed version triple loaded")
+	} else if kindOf(t, err, "incompatible") == nil {
+		t.Fatal("wanted incompatible")
+	}
+}
+
+func TestUnknownPendingKindIsRefused(t *testing.T) {
+	s := testStore(t)
+	run, accepted := playRun(t, sampleActions())
+	lock, err := s.Hold("waiting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Release() }()
+	f := Of(run, accepted, s.Engine)
+	f.Pending = "timecapsule:delivery-window"
+	err = s.Save("waiting", f, lock)
+	if err == nil {
+		t.Fatal("an unshowable pending choice saved")
+	}
+	// The writer-verify wraps the reader's refusal; the message must still
+	// name the choice it cannot show.
+	if !strings.Contains(err.Error(), "timecapsule") || !strings.Contains(err.Error(), "cannot show") {
+		t.Fatalf("the refusal must name the pending kind: %v", err)
+	}
+}
+
+// TestPendingTagMustMatchState covers both lies: a claimed stop with nothing
+// to answer, and an unanswered stop the file pretends is finished.
+func TestPendingTagMustMatchState(t *testing.T) {
+	s := testStore(t)
+	run, accepted := playRun(t, sampleActions())
+	saveRun(t, s, "clean", run, accepted)
+	path := mustPath(t, s, "clean")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lie := strings.Replace(string(b), `"trace":`, `"pending":"encounter:customs","trace":`, 1)
+	if lie == string(b) {
+		t.Fatal("fixture drifted; cannot forge the tag")
+	}
+	if err := os.WriteFile(path, []byte(lie), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadErr(s, "clean"); err == nil {
+		t.Fatal("a pending tag with no encounter loaded")
+	} else {
+		kindOf(t, err, "corrupt")
+	}
+}
+
+// customsScript drives a full-rules run into a border stop: buy the hot card
+// in Huaqiangbei, leave town with it. Returns runs that stopped, keyed by the
+// actions that got them there.
+func customsScript() []game.Action {
+	return []game.Action{
+		{Kind: game.ActTravel, Market: content.Huaqiangbei},
+		{Kind: game.ActBuy, Product: content.Mod40948, Qty: 1},
+		{Kind: game.ActTravel, Market: content.TheDalles},
+	}
+}
+
+// stoppedRun sweeps seeds for one that actually gets stopped at the border on
+// this script, so the test asserts against a real pending state instead of a
+// hand-stacked imitation.
+func stoppedRun(t *testing.T) (*game.Run, []game.Action) {
+	t.Helper()
+	acts := customsScript()
+	for seed := uint64(1); seed <= 3000; seed++ {
+		r, err := game.New(game.Config{
+			Seed: seed, Products: content.AllProducts, Markets: content.AllMarkets,
+			Rules: content.FullRules(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		accepted := make([]game.Action, 0, len(acts))
+		pending := false
+		for _, a := range acts {
+			_, res := r.Apply(a)
+			if !res.OK {
+				break
+			}
+			accepted = append(accepted, a)
+			pending = res.PendingEncounter
+		}
+		if pending && r.State.PendingEncounter != nil {
+			return r, accepted
+		}
+	}
+	t.Fatal("no seed up to 3000 got stopped at the border")
+	return nil, nil
+}
+
+// TestPendingEncounterSurvivesSaveReload is the whole promise of the pending
+// field: the calendar stops, the save carries the drawn outcome, a reload
+// lands on the same paused morning, and answering there matches answering
+// never having left.
+func TestPendingEncounterSurvivesSaveReload(t *testing.T) {
+	run, accepted := stoppedRun(t)
+	s := testStore(t)
+	lock, err := s.Hold("border")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Release() }()
+	f := Of(run, accepted, s.Engine)
+	f.Pending = PendingEncounterPrefix + string(run.State.PendingEncounter.Kind)
+	if err := s.Save("border", f, lock); err != nil {
+		t.Fatalf("the save refused a legal pending stop: %v", err)
+	}
+	other, err := NewStore(s.Dir, "other-build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := other.Load("border")
+	if err != nil {
+		t.Fatalf("reload refused the pending stop: %v", err)
+	}
+	restored, err := got.Run()
+	if err != nil {
+		t.Fatalf("resume from pending: %v", err)
+	}
+	if restored.State.PendingEncounter == nil || *restored.State.PendingEncounter != *run.State.PendingEncounter {
+		t.Fatalf("the stop changed across the save: %+v vs %+v", restored.State.PendingEncounter, run.State.PendingEncounter)
+	}
+	// Answer on the reloaded run, and on a twin that never saved: same fine,
+	// same day, same account. The save cannot reroll a coin it already flipped.
+	twin, _, err := game.Trace{Config: got.Trace.Config, Actions: accepted}.Replay()
+	if err != nil {
+		t.Fatalf("twin replay: %v", err)
+	}
+	recA, resA := restored.ResolveEncounter(game.EncPay)
+	recB, resB := twin.ResolveEncounter(game.EncPay)
+	if !resA.OK || !resB.OK {
+		t.Fatalf("answer refused after reload: %v / %v", resA.Reason, resB.Reason)
+	}
+	if recA.Day != recB.Day || recA.CashAfter != recB.CashAfter || recA.DebtAfter != recB.DebtAfter ||
+		recA.Fine != recB.Fine || restored.State.Day != twin.State.Day {
+		t.Fatalf("the reload moved the money: %s/%s/%s vs %s/%s/%s",
+			game.FormatMoney(recA.CashAfter), game.FormatMoney(recA.DebtAfter), game.FormatMoney(recA.Fine),
+			game.FormatMoney(recB.CashAfter), game.FormatMoney(recB.DebtAfter), game.FormatMoney(recB.Fine))
+	}
+}

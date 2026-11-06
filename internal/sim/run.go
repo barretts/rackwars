@@ -26,6 +26,12 @@ func Prototype(seed uint64) Config {
 	return Config{Seed: seed, Products: content.PrototypeProducts, Markets: content.PrototypeMarkets, Rules: content.PrototypeRules(), MaxActions: 400}
 }
 
+// Full is the shipped base game: six cards, five towns, and the complete
+// rule set — hosting, power, heat, borders, allocation, and clawback.
+func Full(seed uint64) Config {
+	return Config{Seed: seed, Products: content.AllProducts, Markets: content.AllMarkets, Rules: content.FullRules(), MaxActions: 400}
+}
+
 // Play drives a policy until the run is over or the action budget is spent, and
 // returns the finished run with its step list.
 func Play(cfg Config, p Policy) (*game.Run, []game.Step, error) {

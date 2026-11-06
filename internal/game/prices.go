@@ -130,4 +130,7 @@ func (r *Run) refreshMarket(day int) {
 		r.State.Stock[pi] = r.stockFor(day, r.State.Market, p)
 	}
 	r.State.SeenDay[mi] = day
+	// Andy's counter opens with the morning it advertises, in the town it
+	// names, and nowhere else.
+	r.syncAllocationStock(day)
 }

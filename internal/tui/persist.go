@@ -86,6 +86,13 @@ func (m Model) writeSave() Model {
 		}
 	}
 	f := save.Of(m.run, m.actions, m.store.Engine)
+	if e := m.run.State.PendingEncounter; e != nil {
+		// A save taken mid-stop says so on its cover: the continue list shows
+		// the run as standing still, and the resume lands straight on the
+		// answer. The store write-verifies the tag against the state itself,
+		// so the two can never disagree on disk.
+		f.Pending = save.PendingEncounterPrefix + string(e.Kind)
+	}
 	write := m.store.Save
 	if m.restart {
 		// The player chose to start this seed over, so a write that moves the slot
@@ -199,6 +206,7 @@ func (m Model) continueRun() (Model, error) {
 	}
 	m.run = run
 	m.seed = run.Config().Seed
+	m.full = run.Config().Rules.Hosting
 	m.actions = append([]game.Action(nil), f.Trace.Actions...)
 	m.runID = id
 	m.lock = lock
@@ -253,6 +261,7 @@ func (m Model) adoptRun(id string, f save.File) (Model, error) {
 	}
 	m.run = run
 	m.seed = run.Config().Seed
+	m.full = run.Config().Rules.Hosting
 	m.runID = id
 	m.lock = lock
 	m.actions = append([]game.Action(nil), f.Trace.Actions...)

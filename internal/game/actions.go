@@ -21,6 +21,11 @@ const (
 	ReasonInsufficientCredit
 	ReasonNoRoute
 	ReasonNotForSale
+	ReasonCurtailUnavailable
+	ReasonEncounterPending
+	ReasonNoEncounter
+	ReasonPowerOver
+	ReasonAllocationBlocked
 )
 
 func (re Reason) String() string {
@@ -47,6 +52,16 @@ func (re Reason) String() string {
 		return "no such route"
 	case ReasonNotForSale:
 		return "not for sale here"
+	case ReasonCurtailUnavailable:
+		return "no curtailment offer open here"
+	case ReasonEncounterPending:
+		return "answering a police beat first"
+	case ReasonNoEncounter:
+		return "nothing is pending"
+	case ReasonPowerOver:
+		return "over the site's meter"
+	case ReasonAllocationBlocked:
+		return "allocation refused"
 	}
 	return "refused"
 }
@@ -352,6 +367,13 @@ const (
 	ActRepay
 	ActTravel
 	ActStay
+	// ActAllocation accepts a morning's below-street allocation offer. Like
+	// other morning actions it costs no day; unlike buys it is a one-off
+	// deal Andy remembers refusing.
+	ActAllocation
+	// ActEncounter answers the police beat the calendar stopped for. Only a
+	// pending encounter accepts it.
+	ActEncounter
 )
 
 func (k ActionKind) String() string {
@@ -368,6 +390,38 @@ func (k ActionKind) String() string {
 		return "travel"
 	case ActStay:
 		return "stay"
+	case ActAllocation:
+		return "allocation"
+	case ActEncounter:
+		return "encounter"
+	}
+	return "?"
+}
+
+// StayMode is what the player intends to do with the meter overnight.
+type StayMode int
+
+const (
+	// StayAuto hosts the best subset the site's meter can carry: the default
+	// a prototype trace means, and the best play a hosting player wants most
+	// nights. Zero value on purpose — every recorded prototype Action decodes
+	// to it unchanged.
+	StayAuto StayMode = iota
+	// StayPowerOff keeps the GPUs switched off: lease only, no meter.
+	StayPowerOff
+	// StayCurtail takes the grid operator's disclosed payment for staying
+	// off; legal only while such an offer is open for this town.
+	StayCurtail
+)
+
+func (m StayMode) String() string {
+	switch m {
+	case StayAuto:
+		return "auto"
+	case StayPowerOff:
+		return "off"
+	case StayCurtail:
+		return "curtail"
 	}
 	return "?"
 }
@@ -380,6 +434,15 @@ type Action struct {
 	Market  content.MarketID  `json:"market,omitempty"`
 	Qty     int               `json:"qty,omitempty"`
 	Amount  Money             `json:"amount,omitempty"`
+	// Mode is the overnight intent for a stay. Zero value is StayAuto, so
+	// every recorded prototype trace decodes to exactly the night it meant.
+	Mode StayMode `json:"mode,omitempty"`
+	// Powered overrides the auto subset on a stay: a per-product count the
+	// site's meter must be able to carry. nil means take the engine's best
+	// packing, deterministically, so replay never re-puzzles a solved night.
+	Powered []int `json:"powered,omitempty"`
+	// Resp answers a pending encounter.
+	Resp EncounterResponse `json:"resp,omitempty"`
 }
 
 // Receipt is the engine's account of what happened. The end screen's
@@ -410,12 +473,29 @@ type Receipt struct {
 	Repossessed bool              `json:"repossessed,omitempty"`
 	Closed      bool              `json:"closed,omitempty"`
 	CashOut     Money             `json:"cashOut,omitempty"`
+	// Phase 5 itemizations: every new number the settlement moved gets its
+	// own line, so a receipt answers "where did the money go" without a
+	// second screen.
+	Electricity Money             `json:"electricity,omitempty"`
+	Curtail     Money             `json:"curtail,omitempty"`
+	Clawback    Money             `json:"clawback,omitempty"`
+	Powered     []int             `json:"powered,omitempty"`
+	Encounter   string            `json:"encounter,omitempty"`
+	Surrendered content.ProductID `json:"surrendered,omitempty"`
+	Fine        Money             `json:"fine,omitempty"`
+	// Pending marks the receipt that stopped the calendar for an encounter;
+	// the day's account continues on the resolution receipt.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // Result reports whether an action was applied and, if not, why.
 type Result struct {
 	OK     bool   `json:"ok"`
 	Reason Reason `json:"reason"`
+	// PendingEncounter marks the commitment that stopped the calendar: the
+	// day is not over, the beat is not answered, and the interface must ask
+	// before anything else may happen.
+	PendingEncounter bool `json:"pendingEncounter,omitempty"`
 	// Short fields let the TUI name the exact gap in the player's own numbers.
 	ShortCash   Money `json:"shortCash,omitempty"`
 	ShortSlots  int   `json:"shortSlots,omitempty"`
@@ -427,6 +507,11 @@ type Result struct {
 // Apply runs a morning action: buy, sell, borrow, repay. None of them costs a
 // day, and none of them can advance headlines, refresh stock, or reroll prices.
 func (r *Run) Apply(a Action) (Receipt, Result) {
+	if r.State.PendingEncounter != nil && a.Kind != ActEncounter {
+		// The calendar is stopped at a police beat: nobody shops around a
+		// seizure, and no second night commits under an unanswered stop.
+		return Receipt{}, Result{Reason: ReasonEncounterPending}
+	}
 	switch a.Kind {
 	case ActBuy:
 		return r.applyBuy(a)
@@ -438,8 +523,60 @@ func (r *Run) Apply(a Action) (Receipt, Result) {
 		return r.applyRepay(a)
 	case ActTravel, ActStay:
 		return r.CommitDay(a)
+	case ActAllocation:
+		return r.applyAllocation(a)
+	case ActEncounter:
+		return r.ResolveEncounter(a.Resp)
 	}
 	return Receipt{}, Result{Reason: ReasonUnknownProduct}
+}
+
+// applyAllocation takes Andy's constrained supply: whole dollars at the
+// offered share of the local ask, cash-only like every buy, slots and all,
+// and once per run no matter how good tomorrow looks. It costs no day.
+func (r *Run) applyAllocation(a Action) (Receipt, Result) {
+	off := r.PreviewAllocation()
+	if !off.Eligible {
+		switch {
+		case r.State.AllocTaken:
+			return Receipt{}, Result{Reason: ReasonNotForSale}
+		case r.State.Heat >= 60:
+			return Receipt{}, Result{Reason: ReasonAllocationBlocked}
+		case off.Stock <= 0:
+			return Receipt{}, Result{Reason: ReasonInsufficientStock}
+		default:
+			return Receipt{}, Result{Reason: ReasonAllocationBlocked}
+		}
+	}
+	qty := a.Qty
+	if qty <= 0 {
+		return Receipt{}, Result{Reason: ReasonBadQuantity, MaxAccepted: off.Stock}
+	}
+	if qty > off.Stock {
+		return Receipt{}, Result{Reason: ReasonInsufficientStock, ShortStock: qty - off.Stock, MaxAccepted: off.Stock}
+	}
+	cost := off.UnitPrice * Money(qty)
+	if cost > r.State.Cash {
+		return Receipt{}, Result{Reason: ReasonInsufficientCash, ShortCash: cost - r.State.Cash,
+			MaxAccepted: int(r.State.Cash / maxMoney(off.UnitPrice, 1))}
+	}
+	def := content.ProductOf(off.Product)
+	pi := r.Index(off.Product)
+	if qty*def.SlotsPerUnit > r.SlotsAvailable() {
+		return Receipt{}, Result{Reason: ReasonOvercapacity, ShortSlots: qty*def.SlotsPerUnit - r.SlotsAvailable()}
+	}
+	r.State.Cash -= cost
+	r.State.Owned[pi] += qty
+	r.State.CostBasis[pi] += cost
+	r.State.AllocStock -= qty
+	r.State.AllocTaken = true
+	if r.cfg.Rules.Heat && off.Product == content.Mod40948 {
+		// The same hot-card rule as any purchase: below-street does not mean
+		// below-the-meter quiet.
+		r.State.Heat = clampInt(r.State.Heat+10*qty, 0, 100)
+	}
+	rec := r.record(Receipt{Kind: ActAllocation, Product: off.Product, Qty: qty, Cost: cost})
+	return rec, Result{OK: true}
 }
 
 func (r *Run) applyBuy(a Action) (Receipt, Result) {

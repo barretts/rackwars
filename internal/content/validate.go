@@ -87,6 +87,9 @@ func validate(products []ProductID, markets []MarketID, r Rules, camp []Headline
 		if r.Leases && m.Site && m.DailyLease < 0 {
 			return fmt.Errorf("site %q has %d daily lease with leases enabled", id, m.DailyLease)
 		}
+		if r.Hosting && m.Site && m.ElecCentsPerKWh <= 0 {
+			return fmt.Errorf("site %q has %d cents per kWh with hosting enabled; a powered night must be meterable", id, m.ElecCentsPerKWh)
+		}
 		if m.TownFactorPct < 80 || m.TownFactorPct > 120 {
 			return fmt.Errorf("market %q town factor %d%% is outside the 0.8-1.2x range", id, m.TownFactorPct)
 		}
@@ -137,14 +140,60 @@ func validate(products []ProductID, markets []MarketID, r Rules, camp []Headline
 					return fmt.Errorf("campaign day %d effect names %q, which is outside the market table", h.Day, em)
 				}
 			}
+			if e.RequiresClean && e.Kind != EffectHosting && e.Kind != EffectAllocation {
+				return fmt.Errorf("day %d asks for clean operations on kind %d; only hosting windows and allocations may", h.Day, e.Kind)
+			}
 			switch e.Kind {
 			case EffectPriceFactor:
 				if e.Pct <= 0 {
 					return fmt.Errorf("day %d price factor is %d%%", h.Day, e.Pct)
 				}
+				if e.Dollars != 0 {
+					return fmt.Errorf("day %d price factor carries %d dollars", h.Day, e.Dollars)
+				}
 			case EffectStock:
 				if e.Pct < 0 {
 					return fmt.Errorf("day %d stock factor is %d%%", h.Day, e.Pct)
+				}
+				if e.Dollars != 0 {
+					return fmt.Errorf("day %d stock factor carries %d dollars", h.Day, e.Dollars)
+				}
+			case EffectHosting:
+				if e.Pct <= 0 {
+					return fmt.Errorf("day %d hosting factor is %d%%", h.Day, e.Pct)
+				}
+				if e.Dollars != 0 {
+					return fmt.Errorf("day %d hosting factor carries %d dollars", h.Day, e.Dollars)
+				}
+			case EffectCurtailment:
+				// An offer must name its price, its site, and nothing else:
+				// one town, one payment, and the morning board says both.
+				if e.Dollars <= 0 || e.Pct != 0 {
+					return fmt.Errorf("day %d curtailment carries %d dollars at %d%%, want a whole price and no percentage",
+						h.Day, e.Dollars, e.Pct)
+				}
+				if len(e.Markets) == 0 {
+					return fmt.Errorf("day %d curtailment names no site to pay", h.Day)
+				}
+				for _, em := range e.Markets {
+					mk, ok := LookupMarket(em)
+					if !ok || !mk.Site {
+						return fmt.Errorf("day %d curtailment pays %q, which is not a site with a meter", h.Day, em)
+					}
+				}
+			case EffectAllocation:
+				// Below street, limited units, one named card supply.
+				if e.Pct <= 0 || e.Pct >= 100 || e.Dollars <= 0 {
+					return fmt.Errorf("day %d allocation offers %d%% of ask with %d units, want below ask and at least one unit",
+						h.Day, e.Pct, e.Dollars)
+				}
+				if len(e.Markets) == 0 || len(e.Products) == 0 {
+					return fmt.Errorf("day %d allocation names neither a town to supply nor a card to ration", h.Day)
+				}
+			case EffectClawback:
+				if e.Pct <= 0 || e.Pct > 100 || e.Dollars <= 0 {
+					return fmt.Errorf("day %d clawback is %d%% capped at %d, want a share of 100%% or less and a real cap",
+						h.Day, e.Pct, e.Dollars)
 				}
 			default:
 				return fmt.Errorf("day %d has unknown effect kind %d", h.Day, e.Kind)

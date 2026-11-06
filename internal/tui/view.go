@@ -39,6 +39,13 @@ func (m Model) render() string {
 		m.mode = modeEnd
 		return strings.Join(m.endLines(), "\n")
 	}
+	// A pending stop is drawn over the board, not instead of it: the player
+	// can still read the town they are stuck in behind the box.
+	if m.run.State.PendingEncounter != nil {
+		if box := m.encounterBox(); len(box) > 0 {
+			return strings.Join(m.overlayLines(box), "\n")
+		}
+	}
 	switch m.mode {
 	case modeQty:
 		return strings.Join(m.overlayLines(m.qtyBox(b)), "\n")
@@ -48,6 +55,12 @@ func (m Model) render() string {
 		return strings.Join(m.overlayLines(m.travelBox(b)), "\n")
 	case modeConfirm:
 		return strings.Join(m.overlayLines(m.confirmBox(b)), "\n")
+	case modeStay:
+		return strings.Join(m.overlayLines(m.stayBox(b)), "\n")
+	case modeSubset:
+		return strings.Join(m.overlayLines(m.subsetBox(b)), "\n")
+	case modeAlloc:
+		return strings.Join(m.overlayLines(m.allocBox(b)), "\n")
 	case modeHelp:
 		return strings.Join(m.overlayLines(m.helpBox()), "\n")
 	default:
@@ -185,9 +198,21 @@ func (m Model) mainLines(b Board, width int) []string {
 	lines = append(lines, m.chrome.Rule(width))
 	lines = append(lines, m.chrome.fitPad(m.chrome.Muted("Hosting: "+b.Hosting)+
 		m.chrome.Plain("  overnight "+b.StayCost+" interest  travel "+b.TravelCost), width))
+	if b.Power != "" {
+		lines = append(lines, m.chrome.fitPad(m.chrome.Muted("Meter:   "+b.Power), width))
+	}
+	if b.Curtail != "" {
+		lines = append(lines, m.chrome.fitPad(m.chrome.Good(m.chrome.Bullet()+" "+b.Curtail), width))
+	}
+	if b.Alloc != "" {
+		lines = append(lines, m.chrome.fitPad(m.chrome.Warn(m.chrome.Bullet()+" "+b.Alloc), width))
+	}
 	lines = append(lines, m.chrome.fitPad(m.statusLine(b), width))
-	lines = append(lines, m.chrome.fitPad(m.chrome.Muted(
-		"[b]uy  [s]ell  [l]ender  [t]ravel  [e]/[enter] face morning  [?]help  [q]uit"), width))
+	keys := "[b]uy  [s]ell  [l]ender  [t]ravel  [e]/[enter] face morning  [?]help  [q]uit"
+	if b.Full {
+		keys = "[b]uy  [s]ell  [l]ender  [a]llocation  [t]ravel  [e]/[enter] plan the night  [?]help  [q]uit"
+	}
+	lines = append(lines, m.chrome.fitPad(m.chrome.Muted(keys), width))
 	return lines
 }
 

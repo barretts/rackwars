@@ -13,6 +13,27 @@ const (
 	// EffectStock scales the shop's replenished quantity (Pct 0 means the
 	// card is unavailable for the duration).
 	EffectStock
+	// EffectHosting multiplies the hosting payout of the affected cards for
+	// its duration: this is the featured workload window. The featured
+	// payout is the one thing hosting has that trading does not, which is
+	// why every featured window also lifts the card's resale price.
+	EffectHosting
+	// EffectCurtailment is the grid operator's disclosed offer: one night
+	// switched off at the affected site pays Dollars instead of hosting.
+	// The offer is bounded, named in the morning board, and compared with
+	// the hosting preview so the player can choose with both numbers open.
+	EffectCurtailment
+	// EffectAllocation is the limited below-street offer (Pct of the local
+	// ask, Dollars units in total): allocation Andy's constrained supply.
+	// It is an offer, never a requirement, and clean operations only: a hot
+	// rack is refused with the reason stated.
+	EffectAllocation
+	// EffectClawback reinterprets a hosting invoice after the fact: a stay
+	// hosted with a card in the effect's class pays back Pct percent of the
+	// previous night's payout on the following night's close, capped at
+	// Dollars. A contract that can be revisited must say so the morning
+	// before, and it does: the warning line carries the review.
+	EffectClawback
 )
 
 // DemandClass narrows an effect to consumer or enterprise cards. An empty
@@ -27,7 +48,10 @@ const (
 
 // Effect is one dated, bounded piece of market mechanics. Pct is a percentage:
 // 100 leaves a value alone, 250 triples it. Duration is in days counting the
-// day the effect starts, so a two-night rush has Days 2.
+// day the effect starts, so a two-night rush has Days 2. Dollars carries the
+// whole-dollar amount for the kinds that pay or cap rather than scale
+// (curtailment's offer, allocation's units, clawback's cap); it must be zero
+// for every other kind, and Validate holds it to that rule.
 type Effect struct {
 	Kind     EffectKind
 	Markets  []MarketID  // empty: every market in the run
@@ -35,6 +59,13 @@ type Effect struct {
 	Class    DemandClass
 	Pct      int
 	Days     int
+	Dollars  int
+	// RequiresClean marks the offers that turn away a hot rack: at 60 heat
+	// the engine skips these effects with the reason stated, which is the
+	// design's "clean premium contracts and new allocation deals are
+	// unavailable", while ordinary buying and selling stay open. Only
+	// hosting and allocation effects may carry it.
+	RequiresClean bool
 }
 
 // Headline is one day of the campaign. Tomorrow is the warning shown on the
@@ -66,13 +97,14 @@ var campaign = []Headline{
 		Tomorrow: "Somebody is always buying cards eventually.",
 		Effects:  []Effect{{Kind: EffectPriceFactor, Products: []ProductID{Sled3090}, Pct: 50, Days: 2}}},
 	{Day: 5, Text: "Used-card listings thin out",
-		Tomorrow: "A chatbot launch is expected to create demand for ordinary consumer cards.",
+		Tomorrow: "A chatbot launch is expected to create demand for ordinary consumer cards, in resale and in hosting alike.",
 		Effects:  nil},
 	{Day: 6, Text: "CHATBOT NEEDS EVERY CARD YOU JUST SOLD",
 		Tomorrow: "Consumer demand usually fades within a few days.",
 		Effects: []Effect{
 			{Kind: EffectPriceFactor, Class: ClassConsumer, Pct: 150, Days: 2},
 			{Kind: EffectStock, Class: ClassConsumer, Pct: 55, Days: 2},
+			{Kind: EffectHosting, Pct: 200, Days: 2},
 		}},
 	{Day: 7, Text: "Every small model needs a GPU",
 		Tomorrow: "Consumer-card demand is still elevated but will not stay.",
@@ -84,10 +116,11 @@ var campaign = []Headline{
 		Tomorrow: "Enterprise cards are likely to be scarce and expensive; limited allocations may appear.",
 		Effects:  nil},
 	{Day: 10, Text: "ALLOCATION ANDY IS SUPPLY CONSTRAINED",
-		Tomorrow: "Allocation windows close as fast as they open.",
+		Tomorrow: "Allocation windows close as fast as they open. Below-ask H100s at The Dalles, for clean operations only (heat under 60).",
 		Effects: []Effect{
 			{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 130, Days: 3},
 			{Kind: EffectStock, Class: ClassEnterprise, Pct: 50, Days: 3},
+			{Kind: EffectAllocation, Markets: []MarketID{TheDalles}, Products: []ProductID{CardH100}, Pct: 85, Dollars: 3, Days: 3, RequiresClean: true},
 		}},
 	{Day: 11, Text: "Lead times measured in quarters",
 		Tomorrow: "Trade rules are being rewritten again.",
@@ -99,11 +132,14 @@ var campaign = []Headline{
 		Tomorrow: "Modded-card spreads and customs attention usually follow the rules.",
 		Effects:  []Effect{{Kind: EffectPriceFactor, Products: []ProductID{Mod40948, Sled3090}, Pct: 115, Days: 3}}},
 	{Day: 13, Text: "Customs brokers are hiring",
-		Tomorrow: "A hosting payment is under review somewhere.",
+		Tomorrow: "A hosting payment is under review somewhere: if you hosted with enterprise cards, some of last night's payout can be clawed back, capped at $2,500.",
 		Effects:  nil},
 	{Day: 14, Text: "SAM IS OUT. SAM IS BACK. YOUR INVOICE IS UNDER REVIEW.",
 		Tomorrow: "Hosting contracts can be reinterpreted after the fact.",
-		Effects:  []Effect{{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 92, Days: 3}}},
+		Effects: []Effect{
+			{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 92, Days: 3},
+			{Kind: EffectClawback, Class: ClassEnterprise, Pct: 100, Dollars: 2500, Days: 1},
+		}},
 	{Day: 15, Text: "Your invoice has been clarified",
 		Tomorrow: "Long-context models want long-context memory.",
 		Effects:  nil},
@@ -111,23 +147,24 @@ var campaign = []Headline{
 		Tomorrow: "Memory-heavy cards tend to get bid up when long context is the story.",
 		Effects:  nil},
 	{Day: 17, Text: "Attention is the scarce resource again",
-		Tomorrow: "A memory-heavy launch is expected to lift premium cards.",
+		Tomorrow: "A memory-heavy launch is expected to lift premium cards, in resale and in hosting rates.",
 		Effects:  nil},
 	{Day: 18, Text: "STRAWBERRY THINKS LONGER. YOUR METER DOES TOO.",
 		Tomorrow: "Premium-card premiums fade.",
 		Effects: []Effect{
 			{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 135, Days: 2},
 			{Kind: EffectPriceFactor, Products: []ProductID{Mod40948}, Pct: 140, Days: 2},
+			{Kind: EffectHosting, Products: []ProductID{Mod40948, CardA100, CardH100, CardMI300}, Pct: 300, Days: 2},
 		}},
 	{Day: 19, Text: "Everybody needs memory, briefly",
 		Tomorrow: "The grid operator is watching the weather.",
 		Effects:  []Effect{{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 120, Days: 2}}},
 	{Day: 20, Text: "Demand curves argued about in public",
-		Tomorrow: "The grid operator may ask sites to stop; power conditions could change for a stated window.",
+		Tomorrow: "The grid operator may ask West Texas sites to stop: if you stay there, a bounded curtailment offer to keep the night switched off will be on the table.",
 		Effects:  nil},
 	{Day: 21, Text: "THE GRID WOULD LIKE YOU TO STOP",
 		Tomorrow: "Curtailment offers are bounded and disclosed.",
-		Effects:  nil},
+		Effects:  []Effect{{Kind: EffectCurtailment, Markets: []MarketID{WestTexas}, Dollars: 8000, Days: 2}}},
 	{Day: 22, Text: "Curtailment season",
 		Tomorrow: "Nothing scheduled; the market is on its own.",
 		Effects:  nil},
@@ -139,10 +176,17 @@ var campaign = []Headline{
 		Effects:  []Effect{{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 85, Days: 4}}},
 	{Day: 25, Text: "HANGZHOU HAS A SMALL MODEL AND A LARGE RUMOR",
 		Tomorrow: "CheapSeek launches tomorrow. Enterprise resale and rental rates are expected to fall sharply; consider reducing debt or enterprise exposure.",
-		Effects:  []Effect{{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 90, Days: 3}}},
+		Effects: []Effect{
+			{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 90, Days: 3},
+			{Kind: EffectHosting, Products: []ProductID{Mod40948, CardA100, CardH100, CardMI300}, Pct: 125, Days: 2, RequiresClean: true},
+		}},
 	{Day: 26, Text: "CHEAPSEEK MONDAY",
 		Tomorrow: "CheapSeek pricing holds one more day; the lender checks collateral every morning.",
-		Effects:  []Effect{{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 50, Days: 2}}},
+		Effects: []Effect{
+			{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 50, Days: 2},
+			{Kind: EffectHosting, Products: []ProductID{Sled3090, Card4090, Mod40948}, Pct: 300, Days: 2},
+			{Kind: EffectHosting, Class: ClassEnterprise, Pct: 50, Days: 2},
+		}},
 	{Day: 27, Text: "Small models, large collateral problems",
 		Tomorrow: "Keynote season is not over.",
 		Effects:  []Effect{{Kind: EffectPriceFactor, Class: ClassEnterprise, Pct: 60, Days: 2}}},

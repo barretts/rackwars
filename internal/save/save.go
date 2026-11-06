@@ -102,9 +102,18 @@ func checkPath(path string) error {
 }
 
 // File is a versioned snapshot and the action trace that produced it.
-const SchemaVersion = 1
-const EngineVersion = "prototype-1"
-const ContentVersion = "campaign-1"
+const SchemaVersion = 2
+const EngineVersion = "full-1"
+const ContentVersion = "campaign-2"
+
+// The version 1 triple is the trading prototype: schema 1, the prototype
+// engine, and the campaign-1 content. Those files migrate forward on read —
+// see normalizeVersion — and every other combination is refused.
+const (
+	v1Schema  = 1
+	v1Engine  = "prototype-1"
+	v1Content = "campaign-1"
+)
 
 type File struct {
 	Schema       int    `json:"schemaVersion"`
@@ -123,10 +132,13 @@ type File struct {
 	// last quotes seen in every town, run statistics, and any ending.
 	State game.State `json:"state"`
 
-	// Pending names something the run is waiting on. The trading prototype has
-	// nothing of the kind; the field exists so a later ruleset that stops the
-	// morning on an encounter cannot resume past it, and so load can refuse a
-	// save whose pending choice this build cannot present.
+	// Pending names something the run is waiting on. An empty string means
+	// nothing is owed: the state is a complete morning. A full-rules run that
+	// the police stopped mid-day saves with Pending set to an "encounter:" tag
+	// naming the stop; the state then holds the drawn outcome, and Resume plus
+	// trace replay both land exactly on the paused morning so the answer can
+	// be given after a reload. Any other pending kind is a choice this build
+	// cannot show, and load refuses it instead of resuming past it.
 	Pending string `json:"pending,omitempty"`
 }
 
@@ -564,11 +576,36 @@ func (s *Store) load(path string) (File, error) {
 			Message: fmt.Sprintf("%s is damaged: the file is not readable as a saved run (%v). "+
 				"Recover the last good copy, or start a new run.", path, err)}
 	}
+	if err := normalizeVersion(&f, path); err != nil {
+		return File{}, err
+	}
 	if err := s.check(f, path); err != nil {
 		return File{}, err
 	}
 	s.written[path], _ = hashOf(path)
 	return f, nil
+}
+
+// normalizeVersion is the one migration this build carries: a version 1 file
+// is a trading-prototype run, the ruleset that never grew hosting, heat,
+// encounters, or allocations, so every field phase 5 added is legitimately
+// zero in it and the state carries forward untouched. The trace replays on
+// prototype rules either way — the rules travel inside the config — so the
+// replay check cannot be fooled by an edited v1 file that smuggles in nonzero
+// phase 5 fields: the resume validator and the replay comparison still have
+// to agree. The migrated header is written forward by the next autosave; a
+// file from any other version, or a mix, is refused with the matching-build
+// sentence instead of being guessed at.
+func normalizeVersion(f *File, path string) error {
+	switch {
+	case f.Schema == SchemaVersion && f.RulesVersion == EngineVersion && f.Content == ContentVersion:
+		return nil
+	case f.Schema == v1Schema && f.RulesVersion == v1Engine && f.Content == v1Content:
+		f.Schema, f.RulesVersion, f.Content = SchemaVersion, EngineVersion, ContentVersion
+		return nil
+	default:
+		return failure("incompatible", path, "%s uses an unsupported save, engine, or content version. Keep the file and use the matching build; the only save this build migrates is version 1.", path)
+	}
 }
 
 // Recover returns the last good copy of a run. The active file is tried first;
@@ -664,19 +701,34 @@ func (s *Store) writable(f File, path string) error {
 // and a save waiting on a choice this build cannot show must not be resumed past
 // it. Both failures come with the recovery sentence the player needs, not a
 // stack trace.
+// PendingEncounterPrefix tags the one pending kind this build knows how to
+// finish: the save names the stop, and the answer is given on the resume.
+const PendingEncounterPrefix = "encounter:"
+
 func (s *Store) check(f File, path string) error {
 	if f.Schema != SchemaVersion || f.RulesVersion != EngineVersion || f.Content != ContentVersion {
-		return failure("incompatible", path, "%s uses an unsupported save, engine, or content version. Keep the file and use the matching build; no automatic migration is available.", path)
+		return failure("incompatible", path, "%s uses an unsupported save, engine, or content version. Keep the file and use the matching build; the only save this build migrates is version 1.", path)
 	}
 	if _, err := game.Resume(f.Trace.Config, f.State); err != nil {
 		return &Failure{Kind: "corrupt", Path: path, Err: err,
 			Message: fmt.Sprintf("%s does not hold a legal run: %v. Recover the last good copy, or start a new run.",
 				path, err)}
 	}
-	if f.Pending != "" {
+	// A pending tag must be one this build can show, and it must agree with
+	// the state: a stop claimed without an encounter to resolve, or an
+	// unresolved encounter never tagged, would both resume into a morning the
+	// player cannot actually finish.
+	tagged := strings.HasPrefix(f.Pending, PendingEncounterPrefix)
+	if f.Pending != "" && !tagged {
 		return &Failure{Kind: "pending", Path: path,
 			Message: fmt.Sprintf("%s stops on a choice this build cannot show (%s); the run cannot be resumed safely. "+
 				"Recover the last good copy, or start a new run.", path, f.Pending)}
+	}
+	if tagged != (f.State.PendingEncounter != nil) {
+		return &Failure{Kind: "corrupt", Path: path,
+			Message: fmt.Sprintf("%s disagrees about the morning it stopped on: the file says pending=%q "+
+				"while the run carries %v. Recover the last good copy, or start a new run.",
+				path, f.Pending, f.State.PendingEncounter != nil)}
 	}
 	if why, err := traceAgrees(f); err != nil {
 		return &Failure{Kind: "drift", Path: path, Err: err,
@@ -729,8 +781,52 @@ func firstStateDifference(got, want game.State) diff {
 		return diff{"prices", quotesLabel(got.Quotes), quotesLabel(want.Quotes)}
 	case got.Stats != want.Stats:
 		return diff{"run statistics", statsLabel(got.Stats), statsLabel(want.Stats)}
+	case got.Heat != want.Heat:
+		return diff{"rack heat", strconv.Itoa(got.Heat), strconv.Itoa(want.Heat)}
+	case got.LastHostEnt != want.LastHostEnt:
+		return diff{"enterprise review stamp", game.FormatMoney(got.LastHostEnt), game.FormatMoney(want.LastHostEnt)}
+	case got.AllocTaken != want.AllocTaken:
+		return diff{"allocation claim", strconv.FormatBool(got.AllocTaken), strconv.FormatBool(want.AllocTaken)}
+	case got.AllocStock != want.AllocStock || got.AllocOpenDay != want.AllocOpenDay:
+		return diff{"allocation window", allocLabel(got), allocLabel(want)}
+	case (got.PendingEncounter == nil) != (want.PendingEncounter == nil) ||
+		got.PendingEncounter != nil && *got.PendingEncounter != *want.PendingEncounter:
+		return diff{"the police stop", pendingLabel(got), pendingLabel(want)}
+	case got.PendingKind != want.PendingKind:
+		return diff{"the paused morning's action", strconv.Itoa(int(got.PendingKind)), strconv.Itoa(int(want.PendingKind))}
+	case (got.PendingRec == nil) != (want.PendingRec == nil) ||
+		got.PendingRec != nil && pausedReceiptDiffers(*got.PendingRec, *want.PendingRec):
+		return diff{"the paused receipt", pausedReceiptLabel(got.PendingRec), pausedReceiptLabel(want.PendingRec)}
 	}
 	return diff{}
+}
+
+func allocLabel(s game.State) string {
+	return fmt.Sprintf("%d units since day %d (claimed %v)", s.AllocStock, s.AllocOpenDay, s.AllocTaken)
+}
+
+func pendingLabel(s game.State) string {
+	if s.PendingEncounter == nil {
+		return "no stop"
+	}
+	e := *s.PendingEncounter
+	return fmt.Sprintf("%s on day %d, fine %s", e.Kind, e.Day, game.FormatMoney(e.Fine))
+}
+
+// pausedReceiptDiffers compares the money a paused receipt already carries.
+// The full receipt replays anyway through the trace; what matters for resume
+// is that the answer will be appended to the same morning's numbers.
+func pausedReceiptDiffers(a, b game.Receipt) bool {
+	return a.Kind != b.Kind || a.Day != b.Day || a.Pending != b.Pending ||
+		a.Hosted != b.Hosted || a.Curtail != b.Curtail || a.Clawback != b.Clawback ||
+		a.Fine != b.Fine || !equalInts(a.Powered, b.Powered)
+}
+
+func pausedReceiptLabel(rec *game.Receipt) string {
+	if rec == nil {
+		return "no paused receipt"
+	}
+	return fmt.Sprintf("day %d %s, hosted %s", rec.Day, rec.Kind, game.FormatMoney(rec.Hosted))
 }
 
 func equalInts(a, b []int) bool {
@@ -774,7 +870,9 @@ func quotesLabel(v []game.Quote) string {
 }
 
 func statsLabel(s game.Stats) string {
-	return fmt.Sprintf("interest %s, commitments %d", game.FormatMoney(s.InterestPaid), s.Commitments)
+	return fmt.Sprintf("interest %s, commitments %d, curtailment %s, clawback %s",
+		game.FormatMoney(s.InterestPaid), s.Commitments,
+		game.FormatMoney(s.CurtailIncome), game.FormatMoney(s.ClawbackPaid))
 }
 
 // writeSynced writes a file and asks the OS to get it onto the platter before

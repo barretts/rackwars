@@ -40,6 +40,13 @@ func (m Model) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "l":
 		m.mode, m.loanDraft, m.loanAction, m.status = modeLender, "", loanBorrow, ""
 		return m, nil
+	case "a":
+		if !m.full {
+			m.status, m.statusBad = "Andy's allocations belong to the five-market game.", true
+			return m, nil
+		}
+		m.mode, m.allocDraft, m.status = modeAlloc, "", ""
+		return m, nil
 	case "t":
 		if len(m.otherMarkets()) == 0 {
 			m.status, m.statusBad = "There is nowhere else to go in this cast.", true
@@ -93,6 +100,13 @@ func (m Model) commitDay(a game.Action) Model {
 	// recorded and the board is put on disk before the next morning is drawn.
 	m = m.recordAction(a)
 	m = m.writeSave()
+	if res.PendingEncounter {
+		// The calendar stopped: the day has a receipt but no morning, and the
+		// police box owns the next frame — the Update gate routes every key to
+		// the answer, so this status only has to say what is on screen.
+		m.status, m.statusBad = m.pendingNotice(), false
+		return m
+	}
 	if m.over() {
 		m.mode = modeEnd
 		if m.saveErr == "" {
@@ -100,6 +114,29 @@ func (m Model) commitDay(a game.Action) Model {
 		}
 	}
 	return m
+}
+
+// pendingNotice is the one line the player needs while the calendar stands
+// still: who stopped them, where, and that the answer is already on screen.
+func (m Model) pendingNotice() string {
+	e := m.run.State.PendingEncounter
+	if e == nil {
+		return "The day is standing still: answer below."
+	}
+	return "STOPPED AT " + string(e.Town) + " — " + encounterName(e.Kind) +
+		" — answer below, the calendar is not moving."
+}
+
+func encounterName(k game.EncounterKind) string {
+	switch k {
+	case game.EncounterCustoms:
+		return "a customs beat"
+	case game.EncounterSerial:
+		return "a serial-number check"
+	case game.EncounterNoise:
+		return "a noise complaint"
+	}
+	return "a police beat"
 }
 
 // refusal explains a rejected action using the exact gap the engine measured.
@@ -121,6 +158,14 @@ func refusal(a game.Action, res game.Result) string {
 			return "That amount does not work: enter a whole number of dollars."
 		}
 		return "Enter a whole number of units, or Esc to cancel."
+	case game.ReasonEncounterPending:
+		return "Answer the police first: the calendar is stopped until you do."
+	case game.ReasonPowerOver:
+		return "That much gear cannot run on this site's meter: switch some racks off."
+	case game.ReasonCurtailUnavailable:
+		return "The grid operator is not buying a silent night here tonight."
+	case game.ReasonAllocationBlocked:
+		return "Andy's window says no."
 	default:
 		return "Refused: " + res.Reason.String() + "."
 	}
@@ -150,11 +195,40 @@ func receipt(a game.Action, rec game.Receipt) string {
 	case game.ActTravel:
 		// CommitDay stamps a close receipt with the morning that follows, so the
 		// stamp is already the day the player is now standing in.
-		return "Traveled to " + rec.MarketName + "; freight " + game.FormatMoney(rec.Freight) +
-			"; interest " + game.FormatMoney(rec.Interest) + "; now day " + itoa(rec.Day) + "."
+		out := "Traveled to " + rec.MarketName + "; freight " + game.FormatMoney(rec.Freight) +
+			"; interest " + game.FormatMoney(rec.Interest)
+		if rec.Pending {
+			// The road ended at a checkpoint, not a morning: no day count moved.
+			return out + "; the calendar stopped at the border."
+		}
+		return out + "; now day " + itoa(rec.Day) + "."
 	case game.ActStay:
-		return "Stayed the night; interest " + game.FormatMoney(rec.Interest) + "; now day " +
-			itoa(rec.Day) + "."
+		out := "Stayed the night"
+		if rec.Lease > 0 {
+			out += "; lease " + game.FormatMoney(rec.Lease)
+		}
+		if rec.Hosted > 0 {
+			out += "; hosted +" + game.FormatMoney(rec.Hosted)
+		}
+		if rec.Electricity > 0 {
+			out += "; electric " + game.FormatMoney(rec.Electricity)
+		}
+		if rec.Curtail > 0 {
+			out += "; curtailment +" + game.FormatMoney(rec.Curtail)
+		}
+		if rec.Clawback > 0 {
+			out += "; clawback " + game.FormatMoney(rec.Clawback)
+		}
+		out += "; interest " + game.FormatMoney(rec.Interest)
+		if rec.Pending {
+			return out + "; the calendar stopped."
+		}
+		return out + "; now day " + itoa(rec.Day) + "."
+	case game.ActEncounter:
+		if rec.Encounter != "" {
+			return rec.Encounter
+		}
+		return "Answered."
 	}
 	return "Done."
 }
@@ -175,6 +249,25 @@ func dayLines(closing int, rec game.Receipt) []string {
 	}
 	if rec.Hosted > 0 {
 		out = append(out, "  hosting     +"+game.FormatMoney(rec.Hosted))
+	}
+	if rec.Electricity > 0 {
+		out = append(out, "  electricity "+game.FormatMoney(rec.Electricity))
+	}
+	if rec.Curtail > 0 {
+		out = append(out, "  curtailment +"+game.FormatMoney(rec.Curtail)+" (silent night)")
+	}
+	if rec.Clawback > 0 {
+		out = append(out, "  clawback    "+game.FormatMoney(rec.Clawback)+" (enterprise review)")
+	}
+	if rec.Fine > 0 {
+		out = append(out, "  fine        "+game.FormatMoney(rec.Fine))
+	}
+	if rec.Surrendered != "" {
+		out = append(out, "  surrendered  "+content.ProductOf(rec.Surrendered).Name+
+			" — the beat took it off the truck")
+	}
+	if rec.Pending {
+		out = append(out, "  ** STOPPED: the calendar waits for an answer **")
 	}
 	for _, f := range rec.Forced {
 		out = append(out, "  FORCED SALE "+itoa(f.Units)+" "+content.ProductOf(f.Product).Name+
@@ -357,7 +450,196 @@ func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeBoard
 		return m, nil
 	case "enter", "ctrl+m":
+		if m.full {
+			// The five-market day does not close on a yes/no: the player picks
+			// the night's power plan first. Esc back out of either screen and
+			// nothing has been committed.
+			m.mode, m.stayMode, m.stayPick, m.stayPowered, m.staySel, m.status =
+				modeStay, game.StayAuto, nil, nil, 0, ""
+			return m, nil
+		}
 		return m.commitDay(game.Action{Kind: game.ActStay}), nil
+	}
+	return m, nil
+}
+
+// stayAction is the night plan as picked: the mode plus any hand-picked
+// powered subset, in the exact shape the engine's one plan function reads.
+func (m Model) stayAction() game.Action {
+	a := game.Action{Kind: game.ActStay, Mode: m.stayMode}
+	if m.stayMode == game.StayAuto && len(m.stayPowered) > 0 {
+		a.Powered = append([]int(nil), m.stayPowered...)
+	}
+	return a
+}
+
+func (m Model) handleStayKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode, m.stayPowered, m.stayPick = modeBoard, nil, nil
+		return m, nil
+	case "1":
+		m.stayMode, m.stayPowered, m.stayPick, m.status = game.StayAuto, nil, nil, ""
+		return m, nil
+	case "2":
+		m.stayMode, m.stayPowered, m.stayPick, m.status = game.StayPowerOff, nil, nil, ""
+		return m, nil
+	case "3":
+		if !m.run.PreviewStayMode(game.StayCurtail, nil).Valid {
+			m.status, m.statusBad = "The grid operator is not buying tonight.", true
+			return m, nil
+		}
+		m.stayMode, m.stayPowered, m.stayPick, m.status = game.StayCurtail, nil, nil, ""
+		return m, nil
+	case "p":
+		// Hand-picking cards is a power-on decision; off and curtail run
+		// nothing, so there is nothing to pick.
+		if m.stayMode != game.StayAuto {
+			m.status, m.statusBad = "Switch the plan back to AUTO to pick which racks run.", true
+			return m, nil
+		}
+		if m.stayPick == nil {
+			m.stayPick = make([]int, len(m.run.Products()))
+		}
+		m.mode, m.staySel, m.status = modeSubset, 0, ""
+		return m, nil
+	case "enter", "ctrl+m":
+		if m.stayMode == game.StayAuto && len(m.stayPowered) > 0 &&
+			!m.run.PreviewStayMode(game.StayAuto, m.stayPowered).Valid {
+			m.status, m.statusBad = "That powered set is illegal: pick a smaller one.", true
+			return m, nil
+		}
+		return m.commitDay(m.stayAction()), nil
+	}
+	return m, nil
+}
+
+// handleSubsetKey edits the powered-card picker: plus and minus move a count on
+// the selected rack line, and the engine's own preview — called with the exact
+// counts on screen — says whether that set fits the meter.
+func (m Model) handleSubsetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	n := len(m.run.Products())
+	switch msg.String() {
+	case "esc":
+		m.mode, m.stayPick = modeStay, nil
+		m.status = ""
+		return m, nil
+	case "up", "k":
+		m.staySel = wrap(m.staySel-1, n)
+		return m, nil
+	case "down", "j":
+		m.staySel = wrap(m.staySel+1, n)
+		return m, nil
+	case "+", "=":
+		m.adjustPick(1)
+		return m, nil
+	case "-":
+		m.adjustPick(-1)
+		return m, nil
+	case "enter", "ctrl+m":
+		pv := m.run.PreviewStayMode(game.StayAuto, m.stayPick)
+		if !pv.Valid {
+			m.status, m.statusBad = "The meter cannot carry that: "+pv.Reason.String()+".", true
+			return m, nil
+		}
+		m.stayPowered = append([]int(nil), m.stayPick...)
+		m.mode = modeStay
+		m.status = ""
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) adjustPick(delta int) {
+	i := m.staySel
+	owned := 0
+	for j, row := range m.run.QuoteBoard() {
+		if j == i {
+			owned = row.Owned
+		}
+	}
+	v := m.stayPick[i] + delta
+	if v < 0 {
+		v = 0
+	}
+	if v > owned {
+		v = owned
+	}
+	m.stayPick[i] = v
+}
+
+// handleEncounterKey is the mandatory answer at a police stop. There is no
+// fourth way out: no esc, no other key moves the run or the calendar — the
+// Update gate routes every key here until the answer is given.
+func (m Model) handleEncounterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	pv, ok := m.run.PreviewEncounter()
+	if !ok {
+		return m, nil
+	}
+	var resp game.EncounterResponse
+	switch msg.String() {
+	case "p":
+		resp = game.EncPay
+	case "s":
+		if !pv.CanSurrender {
+			m.status, m.statusBad = "They will not take the goods off your hands: pay, or gamble.", true
+			return m, nil
+		}
+		resp = game.EncSurrender
+	case "c":
+		resp = game.EncContest
+	default:
+		return m, nil
+	}
+	pendingDay := m.run.State.PendingEncounter.Day
+	rec, res := m.run.ResolveEncounter(resp)
+	if !res.OK {
+		// The engine said no, so the stop still stands and the box stays up.
+		m.status, m.statusBad = refusal(game.Action{Kind: game.ActEncounter, Resp: resp}, res), true
+		return m, nil
+	}
+	// The answer is part of the run's history exactly as the engine took it,
+	// and the paused day closes with it: the receipt that was holding the
+	// lease mid-air completes now, so the day log shows the whole night.
+	m = m.recordAction(game.Action{Kind: game.ActEncounter, Resp: resp})
+	m = m.writeSave()
+	m.dayLog = dayLines(pendingDay, rec)
+	m.mode = modeBoard
+	m.status = rec.Encounter
+	m.statusBad = resp == game.EncContest && rec.Fine > 0
+	return m, nil
+}
+
+// handleAllocKey is Andy's window: type a quantity, Enter claims it if the
+// engine still says yes. A refusal keeps the number on screen, same as buying.
+func (m Model) handleAllocKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode, m.allocDraft = modeBoard, ""
+		return m, nil
+	case "backspace":
+		if len(m.allocDraft) > 0 {
+			m.allocDraft = m.allocDraft[:len(m.allocDraft)-1]
+		}
+		return m, nil
+	case "enter", "ctrl+m":
+		n, ok := parseQuantity(m.allocDraft)
+		if !ok || n < 1 {
+			m.status, m.statusBad = "Enter how many units to claim, or Esc to leave them.", true
+			return m, nil
+		}
+		before := len(m.actions)
+		m = m.apply(game.Action{Kind: game.ActAllocation, Qty: n})
+		if len(m.actions) == before {
+			m.mode = modeAlloc
+			return m, nil
+		}
+		m.mode, m.allocDraft = modeBoard, ""
+		return m, nil
+	}
+	if r, ok := digitOf(msg); ok && len(m.allocDraft) < 4 {
+		m.allocDraft += string(r)
+		m.status, m.statusBad = "", false
 	}
 	return m, nil
 }
@@ -498,6 +780,33 @@ func digitOf(msg tea.KeyPressMsg) (rune, bool) {
 		return msg.Code, true
 	}
 	return 0, false
+}
+
+// kwStr renders hundredths of a kilowatt the way the design's meters do:
+// 180 → "1.80 kW". Presentation only — the number stays the engine's.
+func kwStr(kw100 int64) string {
+	neg := kw100 < 0
+	if neg {
+		kw100 = -kw100
+	}
+	s := itoa64(kw100 % 100)
+	if len(s) == 1 {
+		s = "0" + s
+	}
+	s = itoa64(kw100/100) + "." + s
+	if neg {
+		s = "-" + s
+	}
+	return s
+}
+
+// lenCards counts the racks a powered subset would run.
+func lenCards(powered []int) int {
+	n := 0
+	for _, c := range powered {
+		n += c
+	}
+	return n
 }
 
 func moneyDigits(v game.Money) string {

@@ -33,6 +33,16 @@ const (
 	// exists before a run is on screen, and it answers to nothing but its own
 	// keys, so a stray Enter can never start or continue a run by accident.
 	modeContinue
+	// modeStay is the full game's night plan: host the best subset, put the
+	// GPUs to bed, take the grid operator's money, or pick the powered cards
+	// by hand. The prototype has no such screen; its stay is the plain
+	// confirmation, exactly as the recorded traces play it.
+	modeStay
+	// modeSubset is the powered-card editor inside the night plan.
+	modeSubset
+	// modeAlloc is Andy's allocation window: constrained supply at a
+	// disclosed discount, once a run, heat-gated.
+	modeAlloc
 )
 
 type tradeAction int
@@ -82,6 +92,16 @@ type Board struct {
 	StayCost   string
 	TravelCost string
 	Side       []string
+	// Full marks the five-market game. The extra lines below are only ever
+	// filled in that mode, so the prototype board keeps its exact phase-3
+	// layout — and its exact tests.
+	Full bool
+	// Power is the meter read for tonight's auto plan: what runs, on what
+	// wire. Curtail is the grid operator's standing offer, Alloc Andy's
+	// window; both are empty when nothing is on the table.
+	Power   string
+	Curtail string
+	Alloc   string
 }
 
 // Model is the Bubble Tea model. run is the one authority on game state; the
@@ -107,6 +127,16 @@ type Model struct {
 	loanDraft  string
 
 	travelSel int
+
+	// The full game's night plan. stayMode is the highlighted plan, stayPick
+	// the counts being edited in the powered-card screen, and stayPowered the
+	// subset accepted from that editor — nil means the engine's own best plan.
+	full        bool
+	stayMode    game.StayMode
+	stayPick    []int
+	stayPowered []int
+	staySel     int
+	allocDraft  string
 
 	// Saving. store/runID identify where this run lives; actions is the history
 	// of every action the engine accepted this run, which is what a save replays
@@ -137,25 +167,49 @@ type Model struct {
 	dayLog []string
 }
 
-// NewRun starts a prototype run on the given seed. The seed is what a player
-// reports for a bug, and what "Replay This Seed" re-deals.
+// NewRun starts a trading-prototype run on the given seed: the phase-3
+// game, the exact economy the recorded traces replay. The seed is what a
+// player reports for a bug, and what "Replay This Seed" re-deals.
 func NewRun(chrome Chrome, seed uint64) (Model, error) {
-	run, err := game.New(game.Config{
-		Seed:     seed,
-		Products: content.PrototypeProducts,
-		Markets:  content.PrototypeMarkets,
-		Rules:    content.PrototypeRules(),
-	})
+	return newRunAt(chrome, seed, false)
+}
+
+// NewFullRun starts the complete five-market game on the given seed.
+func NewFullRun(chrome Chrome, seed uint64) (Model, error) {
+	return newRunAt(chrome, seed, true)
+}
+
+func newRunAt(chrome Chrome, seed uint64, full bool) (Model, error) {
+	run, err := game.New(dealConfig(seed, full))
 	if err != nil {
 		return Model{}, err
 	}
-	return New(chrome, run), nil
+	m := New(chrome, run)
+	m.full = full
+	return m, nil
+}
+
+// dealConfig deals one seed the cast and ruleset of its game.
+func dealConfig(seed uint64, full bool) game.Config {
+	if full {
+		return game.Config{
+			Seed: seed, Products: content.AllProducts,
+			Markets: content.AllMarkets, Rules: content.FullRules(),
+		}
+	}
+	return game.Config{
+		Seed: seed, Products: content.PrototypeProducts,
+		Markets: content.PrototypeMarkets, Rules: content.PrototypeRules(),
+	}
 }
 
 // New wraps an existing run, which lets a test (or a resumed save) drive a
-// model over engine state it prepared itself.
+// model over engine state it prepared itself. The game it shows is the game
+// the run was dealt: hosting on means the five-market game, whatever seed or
+// save file it came out of.
 func New(chrome Chrome, run *game.Run) Model {
-	return Model{chrome: chrome, run: run, seed: run.Config().Seed}
+	return Model{chrome: chrome, run: run, seed: run.Config().Seed,
+		full: run.Config().Rules.Hosting}
 }
 
 // Init implements tea.Model.
@@ -180,6 +234,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeContinue {
 			return m.handleContinueKey(msg)
 		}
+		// A police stop owns the screen the same way: the calendar is standing
+		// still until the answer is given, and no other key may touch the run.
+		// This covers the stop that just fired and the reload that lands on one.
+		if m.run != nil && m.run.State.PendingEncounter != nil {
+			return m.handleEncounterKey(msg)
+		}
 		// A finished run answers only to the ending screen's keys.
 		if m.over() {
 			m.mode = modeEnd
@@ -198,6 +258,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTravelKey(msg)
 		case modeConfirm:
 			return m.handleConfirmKey(msg)
+		case modeStay:
+			return m.handleStayKey(msg)
+		case modeSubset:
+			return m.handleSubsetKey(msg)
+		case modeAlloc:
+			return m.handleAllocKey(msg)
 		default:
 			return m.handleBoardKey(msg)
 		}
@@ -211,12 +277,7 @@ func (m Model) over() bool { return m.run != nil && m.run.State.Over != game.End
 // startRun replaces the run in place, which is how New Run and Replay This Seed
 // work: same code path, different seed.
 func (m Model) startRun(seed uint64) (Model, error) {
-	run, err := game.New(game.Config{
-		Seed:     seed,
-		Products: content.PrototypeProducts,
-		Markets:  content.PrototypeMarkets,
-		Rules:    content.PrototypeRules(),
-	})
+	run, err := game.New(dealConfig(seed, m.full))
 	if err != nil {
 		return m, err
 	}
@@ -234,6 +295,8 @@ func (m Model) startRun(seed uint64) (Model, error) {
 	m.qtyDraft = ""
 	m.loanDraft = ""
 	m.travelSel = 0
+	m.stayMode, m.stayPick, m.stayPowered, m.staySel, m.allocDraft =
+		game.StayAuto, nil, nil, 0, ""
 	// A new run starts with an empty history and a clean save slate. If the slot
 	// already holds a run for this seed, the player asked for this: the write that
 	// replaces it is allowed, and the store keeps what was there in a .bak copy.
@@ -256,6 +319,7 @@ func (m Model) snapshot() Board {
 		return b
 	}
 	st := r.State
+	b.Full = m.full
 	b.Day = st.Day
 	b.Town = content.MarketOf(st.Market).Name
 	b.Cash = st.Cash
@@ -286,6 +350,26 @@ func (m Model) snapshot() Board {
 
 	stay := r.PreviewStay()
 	b.StayCost = "-" + game.FormatMoney(stay.Interest+stay.Lease)
+	if b.Full {
+		b.Tag = "five markets"
+		b.Hosting = "tonight: host +" + game.FormatMoney(stay.Hosted) +
+			"  electric -" + game.FormatMoney(stay.Electric) +
+			"  lease -" + game.FormatMoney(stay.Lease)
+		b.Power = kwStr(stay.PowerKW) + " of " + kwStr(stay.PowerCap) +
+			" kW on the meter"
+		if curtail := r.PreviewStayMode(game.StayCurtail, nil); curtail.Valid {
+			b.Curtail = "grid operator will pay " + game.FormatMoney(curtail.Curtail) +
+				" for a silent night — [p]lan the night"
+		}
+		if alloc := r.PreviewAllocation(); alloc.Product != "" {
+			b.Alloc = "ANDY'S ALLOCATION: " + itoa(alloc.Stock) + " " +
+				content.ProductOf(alloc.Product).Name + " @" + itoa(alloc.Pct) +
+				"% of ask (" + game.FormatMoney(alloc.UnitPrice) + ") — [a]"
+			if !alloc.Eligible {
+				b.Alloc += " [locked: " + alloc.BlockReason + "]"
+			}
+		}
+	}
 	if dest := m.destMarket(); dest != "" {
 		pv := r.PreviewTravel(dest)
 		b.TravelCost = "-" + game.FormatMoney(pv.Freight) + " to " + content.MarketOf(dest).Name
@@ -296,14 +380,16 @@ func (m Model) snapshot() Board {
 	return b
 }
 
-// otherMarkets lists the prototype's towns the player can travel to, always in
-// content order so the list is stable across runs and terminals.
+// otherMarkets lists the towns this run's cast can reach, always in content
+// order so the list is stable across runs and terminals. The list comes from
+// the run's own config: the prototype sees its three towns and the full game
+// sees all five, with no branch about which game is being played.
 func (m Model) otherMarkets() []content.MarketID {
 	if m.run == nil {
 		return nil
 	}
-	out := make([]content.MarketID, 0, len(content.PrototypeMarkets))
-	for _, id := range content.PrototypeMarkets {
+	out := make([]content.MarketID, 0, len(m.run.Markets()))
+	for _, id := range m.run.Markets() {
 		if id != m.run.State.Market {
 			out = append(out, id)
 		}

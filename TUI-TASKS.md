@@ -35,19 +35,19 @@ All tasks start unchecked. A checkbox means the work and its required evidence e
 
 - [x] Implement versioned save/load, Continue, autosave, and save-and-quit.
 - [x] Use OS-appropriate directories and a `--save-dir` override.
-- [ ] Preserve pending choices, random state, content version, and summary statistics.
+- [x] Preserve pending choices, random state, content version, and summary statistics.
 - [x] Implement last-good backup, tested file replacement, recovery, and visible write failures.
 - [x] Prevent concurrent writers from silently overwriting an active run.
 - [ ] Verify uninterrupted versus resumed traces, corrupt/incompatible saves, and both OS path behaviors.
 
 ## Phase 5 — Full GPU game
 
-- [ ] Add the remaining three products and two markets.
-- [ ] Implement leases, power selection, electricity, ordinary hosting, and featured workloads.
-- [ ] Implement heat, customs choices, recovery, and regional constraints.
-- [ ] Complete the campaign, readable warnings, eligibility, satire, and reconciled receipts.
-- [ ] Update save versions and extend rule/replay coverage.
-- [ ] Record successful cautious, hosting, and risky-import runs without mandatory bonus contracts.
+- [x] Add the remaining three products and two markets.
+- [x] Implement leases, power selection, electricity, ordinary hosting, and featured workloads.
+- [x] Implement heat, customs choices, recovery, and regional constraints.
+- [x] Complete the campaign, readable warnings, eligibility, satire, and reconciled receipts.
+- [x] Update save versions and extend rule/replay coverage.
+- [x] Record successful cautious, hosting, and risky-import runs without mandatory bonus contracts.
 
 ## Phase 6 — Balance and hardening
 
@@ -540,6 +540,203 @@ Open gaps and next owner:
      does, so the exotic `n` (new run) -> pick Continue sequence keeps a
      restart-flavoured save (one allowed backwards write) until the next
      normal save; noted, no behaviour change made.
+Gate: incomplete
+```
+
+```text
+Phase: 5 - Full GPU game
+Owner: omp session (expert-engineer-peirce)
+Commit/build and engine/content version: on top of commit ba07a91 on branch
+  main; this entry is committed together with the Phase 5 code it records.
+  Save format SchemaVersion 2, rules `full-1`, content `campaign-2`, engine
+  version stamped `0.1.0-phase5`. Binary `rackwars 0.1.0-phase5`, built with
+  `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w
+  -X main.version=0.1.0-phase5" -o dist/rackwars.exe ./cmd/rackwars`. The save
+  store now carries its first forward migration: a version 1 file loads, its
+  header retargets to the current triple (the run replays from its own embedded
+  config, so a prototype save stays a prototype run), and the next autosave
+  writes the header forward; a half-migrated file is refused, as is an unknown
+  `pending` kind or a pending tag that disagrees with the replayed state.
+OS / architecture / terminal: Windows 11 build 26200, x64 (go1.26.0
+  windows/amd64, GOAMD64=v1, CGO_ENABLED=0). As in Phases 3-4 the interactive
+  runs were driven through the agent harness's ConPTY pty services (wide
+  layout, Git Bash/MSYS parent), one action per stdin write; the Windows
+  Terminal application window itself was not driven and no macOS host is
+  reachable, so no darwin evidence exists.
+Commands, seed, or action trace:
+  Static: `gofmt -l cmd internal` (no output); `go vet ./...` (clean).
+  `go test ./... -count=1` -> ok rackwars/internal/content (0.591s), game
+  (0.676s), save (1.348s), sim (0.660s), tui (3.116s). `go test -race
+  -timeout 300s ./... -count=1` -> the same five packages ok, no race reports.
+  Full-game rule tests (internal/game/full_test.go):
+  `TestHostingPreviewMatchesSettlement`, `TestExplicitSubsetOverMeterRefused`,
+  `TestGarageMeterForcesPartialHost`, `TestElectricityRoundsUpOnly`,
+  `TestCurtailmentOnlyInsideOfferWindow`, `TestClawbackFollowsEnterpriseHostingOnly`,
+  `TestAllocationHeatGateAndOncePerRun`, `TestHeatGatesFeaturedWorkload`,
+  `TestCustomsStopBlocksEverythingElse`, `TestContestCoinDoesNotReroll`,
+  `TestSurrenderTakesTheNamedUnitOnly`, `TestFineShortfallBecomesDebt`,
+  `TestEncountersAndPrototypeRulesStayAsleep`, `TestTraceCodecPreservesPhase5Actions`.
+  Content: the validator refuses broken tables and campaigns, prunes foreign
+  products for a campaign-for run, announces every big campaign move, and
+  `TestPrototypeRulesAreAPublicSwitchboard` pins the prototype as a config
+  choice, not a code fork.
+  TUI (internal/tui/fullgame_test.go): `TestFullBoardCarriesTheNewLines`,
+  `TestPrototypeKeepsItsBoardAndRefusesAllocation`,
+  `TestNightPlanPreviewMatchesEngineAndClosesTheDay`,
+  `TestPoweredSubsetPickerRoundTrip`, `TestAllocationWindowOpensOnlyWhenTheEngineSaysSo`,
+  `TestStoppedCalendarOwnsEveryKey`, `TestStoppedRunSavesTaggedAndResumesOnTheAnswer`,
+  `TestHelpCoversTheNewKeys`.
+  Save (additions): `TestVersionOneSaveMigratesOnLoad`,
+  `TestHalfMigratedV1IsRefused`, `TestUnknownPendingKindIsRefused`,
+  `TestPendingTagMustMatchState`, `TestPendingEncounterSurvivesSaveReload`.
+  Phase 2 gate seeds: the `--seed N` flag is documented as a deterministic deal
+  (same seed, same deal) without being an advertised difficulty ladder; the
+  Phase 2 winning traces stay byte-pinned by `TestRecordedTracesStillReplay`
+  and were untouched by this phase's content work (the prototype config pins
+  the Phase 1-3 cast, rule tables and campaign tables - campaign day 21, the
+  only full-rule content on the prototype map, was re-tuned from the
+  prototype's own trace evidence, and the traces still replay).
+  Archetype sweep (`internal/sim`, full config = six products, five markets,
+  `FullRules()`): `TestFullGateThreeArchetypesFinish` pins that all three
+  named styles - `trade-repay-full`, `host-run`, `risky-import` - finish day
+  30 `closed` with a positive cash-out on every seed of {5, 16, 18, 25, 27,
+  33}. Across seeds 1..40 each policy closes 11 runs and repossesses 29, and
+  the wins land on exactly those six seeds for all three styles, so no style
+  wins on a private lucky pocket. `risky-import` never claims an allocation
+  and `trade-repay-full` needs no featured workloads at all: the gate's "no
+  mandatory bonus contract" half holds by construction of the policies.
+  Fog-of-war caveat, recorded honestly: quotes are last-seen values, so an
+  unvisited Huaqiangbei reads 0/absent and the import trips that produced
+  these wins bought on a prior visit and crossed cargo-light - across the
+  winning runs zero cargo-bearing border stops fired and no fine was paid.
+  The customs/fine machinery is owned by the engine tests above and by the
+  live stopped-calendar capture below, not by the sweep.
+  Live binary runs, ConPTY services, saves under %TEMP%\rw-evid, rebuilt
+  0.1.0-phase5 exe, one action per write (write `X` lands as X+Enter, an empty
+  write lands as two Enters - the Phase 4 harness quirk, plus a new one: a raw
+  ESC byte arrives glued to the trailing newline as alt+Enter, so boxes that
+  can only be left with Esc cannot be left by this harness):
+  - Seed 5 (first full-board capture): day-1 garage board with the
+    `[five markets]` tag, all six product rows (H100 ask $45,056),
+    `Meter:   0.00 of 2.00 kW on the meter`, key line
+    `[b]uy  [s]ell  [l]ender  [a]llocation  [t]ravel  [e]/[enter] plan the night`,
+    the hosting preview line, and the day-1 used-card-aisle-full warning.
+    `e` opened `THE NIGHT AHEAD AT The garage` (lease/meter/heat line, [1] AUTO
+    with the engine's cash-after, [2] POWER OFF "the rack cools", [3] curtail
+    printed as the no-offer note `no offer standing here tonight` on day 1);
+    `2`+enter committed the power-off plan; `DAY 1 CLOSE` panel (interest
+    $2,000) and the status line `Stayed the night; interest $2,000; now day 2.`
+    followed. `a` opened `ANDY'S ALLOCATION` with
+    `No allocation window is open here today.`
+    The import path `t4` (garage -> Huaqiangbei, freight $1,000 on the DAY 1
+    CLOSE panel), `jjb1` (bought 1 4090-48 MOD for $2,316, heat 0 -> 10),
+    `t4` (Huaqiangbei -> The Dalles): this crossing drew no customs beat -
+    clean arrival, MOD hosted +$90/electric -$2 in the travel-night preview -
+    which is what the sweep said seed 5 does; it is recorded as the
+    no-encounter contrast case.
+  - The sweep of the exact live pattern (travel Huaqiangbei, buy one MOD,
+    travel The Dalles) over seeds 1..3000 put the first customs stops at
+    seeds 94, 106, 130, 143, 211, 213, 217, 229 (throwaway probe, not checked
+    in). Seed 94 replayed live exactly: `t4`, `jjb1` (1 4090-48 MOD for
+    $2,538, heat 10), `t4` -> the calendar STOPPED and the frame carried
+    `CUSTOMS: LEAVING HUAQIANGBEI`, `The manifest says 1 units crossed. They
+    would like to make this go away.`, `fine: $200   cash you hold: $5,412`,
+    `contest at 40% to take nothing`,
+    `losing contests costs the $200 fine and nothing more`,
+    `they point at one box: the 4090-48 MOD with the broken corner.`,
+    `[p] pay it   [s] hand over the goods   [c] contest (40%)`, the board's
+    quotes frozen at $0, the header still Day 2/30, and the status
+    `STOPPED AT thedalles - a customs beat - answer below, the calendar is
+    not moving.` `p` paid: cash $5,412 -> $5,212 (the $200 fine), the calendar
+    moved 2 -> 3, and the run later saved with `S` -> exit code 0,
+    `run-seed-94.json` plus `.bak` both carrying `schemaVersion: 2`.
+  - Closing day 3 at The Dalles on the AUTO plan gave the night plan with
+    `hosted +$90   electric -$2`, `power 0.60/8.00 kW` and the power-off
+    cash-after $4,862 beside the AUTO $4,950, then the itemized
+    `DAY 3 CLOSE` panel (`lease $350`, `interest $2,420`, `hosting +$90`,
+    `electricity $2`, `cash $4,950 debt $26,620`) with the matching status
+    line `Stayed the night; lease $350; hosted +$90; electric $2; interest
+    $2,420; now day 4.` The meter line read `0.60 of 8.00 kW on the meter`
+    (one MOD at 0.60 kW) and `0.00 of 0.00 kW` at Huaqiangbei, which has no
+    power at all - the regional constraint doing its job on the board.
+  - Prototype smoke: `./dist/rackwars.exe --prototype --seed 3` ->
+    `[trading prototype]` tag, three product rows,
+    `Hosting: off (prototype)` and no Meter line, key line without
+    `[a]llocation` and with `[e]/[enter] face morning`, the plain
+    `FACE THE MORNING?` confirm; `a` was a silent no-op as pinned by
+    `TestPrototypeKeepsItsBoardAndRefusesAllocation` (the sentence
+    `Andy's allocations belong to the five-market game.` is the full-mode
+    guard and is pinned in-process; this harness cannot open a board key box
+    without its trailing Enter, so the live frame shows the no-op path).
+    Autosave wrote `run-seed-3.json` at schema v2; the session was stopped
+    with Stop-Process after the autosave check (no clean-exit claim here -
+    the full-mode `S` exit 0 above is the clean-exit evidence).
+  - `./dist/rackwars.exe --version` -> `rackwars 0.1.0-phase5`.
+Observed result:
+  The exit gate - "a cautious trading run, a legitimate hosting run, and a
+  risky import run can finish on documented seeds" - is met: all three
+  archetypes close on {5, 16, 18, 25, 27, 33} with positive cash-out
+  (`TestFullGateThreeArchetypesFinish`), the hosting economy itemizes on the
+  live board (meter, lease, hosted line, DAY CLOSE panel), the customs
+  encounter stops the calendar live, answers with full disclosures, and pays
+  out to the ledger, and a stopped run saves tagged and resumes straight onto
+  the answer (`TestStoppedRunSavesTaggedAndResumesOnTheAnswer` pins the
+  round trip including the writer-lock refusal for a second live window).
+  Prototype behaviour is unchanged where it should be: same board minus the
+  five-market lines, encounters and hosting asleep under prototype rules
+  (`TestEncountersAndPrototypeRulesStayAsleep`), Phase 2 traces replaying.
+  Defects found and fixed while producing this evidence:
+  1. `Model.snapshot()` never copied `m.full` into the render model, so on
+     every real frame the five-market tag, the Meter line, the hosting
+     preview and the `[a]llocation` key were dead code - the live board was a
+     prototype board wearing a full game's keys. `b.Full = m.full` added.
+  2. `Update()` had no dispatch cases for the stay-plan, powered-subset and
+     allocation modes: the handlers existed but were unreachable, so `e` from
+     the board fell into the prototype confirm path and a full run could
+     never close a day with hosting at all. Cases added for all three modes.
+     Both defects were invisible to the earlier prototype-shaped tests because
+     none of them ever rendered a full-mode model.
+  3. Two fullgame tests mis-asserted their own harness (not the product): the
+     first window never recorded the pre-model history (now seeded the way
+     resume records it), and the "second window resumes" case never put the
+     first window down first - the writer lock then correctly refused the
+     resume it wanted to demo; the test now releases like `[S]` does before
+     the second window claims. The resumed window also needs the window-size
+     message before it can render, like every real window.
+Open gaps and next owner:
+  1. No macOS evidence of any kind, unchanged from Phases 3-4; the platform
+     gate still needs `go test ./... -count=1` plus a live
+     save/quit/resume/encounter run in macOS Terminal.app, and Windows
+     Terminal application-window evidence is still owed everywhere (ConPTY
+     harness only). The human keyboard-only 30-day runs also stay open.
+  2. No live 30-day archetype run end to end in the TUI: the wins are pinned
+     headless (sim gate) and the surface is pinned live, but one full live
+     archetype run per style should be recorded in Phase 6's balance pass -
+     the harness can drive it (every key in the full flow is reachable with
+     digit+Enter paths), it is only long.
+  3. The customs-box capture paid the fine; surrender and contest live frames
+     are not recorded (in-process only:
+     `TestSurrenderTakesTheNamedUnitOnly`, `TestContestCoinDoesNotReroll`).
+     The contest's frozen-coin rule (the coin is drawn when the box is dealt,
+     answering cannot reroll it) is engine-pinned.
+  4. Featured-workload frames (allocation claim, clawback receipt line,
+     curtailment offer window) are pinned in-process
+     (`TestAllocationWindowOpensOnlyWhenTheEngineSaysSo`,
+     `TestClawbackFollowsEnterpriseHostingOnly`,
+     `TestCurtailmentOnlyInsideOfferWindow`) but were not hit live: the seeds
+     driven here had no open window on day 1 and the power-off offer never
+     stood at those sites that night.
+  5. The subset editor's interior could not be screenshotted live: any write
+     ends with Enter, which is also the editor's commit key, and raw ESC
+     arrives glued to that Enter as alt+Enter. The round trip
+     (open -> commit -> engine) is pinned by `TestPoweredSubsetPickerRoundTrip`
+     and the editor does open and commit live; only the intermediate frame is
+     harness-unreachable. A harness that can send a lone Enter or a lone Esc
+     would close this.
+  6. `--prototype --seed N` with a saved full-rules file of the same seed
+     picks the file (continue list) - the mode is a property of the run, not
+     the flag; fine, but a "new run of seed X in mode Y" affordance does not
+     exist and is not claimed.
 Gate: incomplete
 ```
 

@@ -49,6 +49,12 @@ type Stats struct {
 	HostingIncome Money `json:"hostingIncome"`
 	PowerCost     Money `json:"powerCost"`
 	LeasePaid     Money `json:"leasePaid"`
+	// CurtailIncome is grid-operator money taken for a switched-off night;
+	// ClawbackPaid is invoice reinterpretation returned to counterparties.
+	// Both ride the end screen so every dollar a stay earned or gave back is
+	// accounted for.
+	CurtailIncome Money `json:"curtailIncome,omitempty"`
+	ClawbackPaid  Money `json:"clawbackPaid,omitempty"`
 	FreightPaid   Money `json:"freightPaid"`
 	ForcedLoss    Money `json:"forcedLoss"`
 	ForcedUnits   int   `json:"forcedUnits"`
@@ -103,6 +109,26 @@ type State struct {
 	// guaranteed arrival price.
 	Quotes  []Quote `json:"quotes"`
 	SeenDay []int   `json:"seenDay"`
+
+	// LastHostEnt is last night's hosting gross earned by enterprise cards,
+	// the number an invoice clawback can come back for. Travel clears it.
+	LastHostEnt Money `json:"lastHostEnt,omitempty"`
+	// AllocTaken marks that this run already accepted an allocation offer:
+	// Andy's constrained supply is one offer per run, not a standing order.
+	AllocTaken bool `json:"allocTaken,omitempty"`
+	// AllocStock is the units the active allocation window still has.
+	AllocStock int `json:"allocStock,omitempty"`
+	// AllocOpenDay is the campaign day the current allocation window opened
+	// on, so stock is refilled once per window, never mid-window.
+	AllocOpenDay int `json:"allocOpenDay,omitempty"`
+	// PendingEncounter is the mid-day police beat that halts the calendar:
+	// travel/stay costs already applied, interest and the next morning wait
+	// on the player's answer. PendingKind is the commitment that walked into
+	// it; PendingRec is the receipt so far, so the resolution continues the
+	// itemization instead of restarting it.
+	PendingEncounter *Encounter `json:"pendingEncounter,omitempty"`
+	PendingKind      ActionKind `json:"pendingKind,omitempty"`
+	PendingRec       *Receipt   `json:"pendingRec,omitempty"`
 
 	Over  EndKind `json:"over"`
 	End   End     `json:"end"`

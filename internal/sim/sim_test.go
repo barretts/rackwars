@@ -94,6 +94,23 @@ func TestGateWarnedLeveragedCrash(t *testing.T) {
 	recordAndReplay(t, "leveraged-crash", Leveraged, chosen.Seed, run, steps)
 }
 
+// actionsAgree compares a recorded action with the decoded one. A powered
+// subset written as "[]" reads back as an empty slice, and the policy passed
+// nil: both mean "no explicit subset", so they must not be treated as two
+// different actions.
+func actionsAgree(a, b game.Action) bool {
+	if len(a.Powered) != len(b.Powered) {
+		return false
+	}
+	for i := range a.Powered {
+		if a.Powered[i] != b.Powered[i] {
+			return false
+		}
+	}
+	return a.Kind == b.Kind && a.Product == b.Product && a.Market == b.Market &&
+		a.Qty == b.Qty && a.Amount == b.Amount && a.Mode == b.Mode && a.Resp == b.Resp
+}
+
 // recordAndReplay writes the trace to testdata and proves the recorded actions
 // reproduce the recorded result: the same seed and the same actions must land on
 // the same ending, which is what makes a bug report reproducible.
@@ -134,7 +151,7 @@ func recordAndReplay(t *testing.T, base string, policy Policy, seed uint64, run 
 	}
 	for i, want := range steps {
 		got := replaySteps[i]
-		if want.Action != got.Action {
+		if !actionsAgree(want.Action, got.Action) {
 			t.Errorf("step %d action mismatch: want %v, got %v", i, want.Action, got.Action)
 		}
 		if want.Cash != got.Cash || want.Debt != got.Debt || want.NetWorth != got.NetWorth {
