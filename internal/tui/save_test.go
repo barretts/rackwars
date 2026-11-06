@@ -275,6 +275,41 @@ func TestSecondWindowIsTurnedAway(t *testing.T) {
 	}
 }
 
+// TestTakeoverOfAStaleMarkerIsSurfaced: after a crash, carrying on takes over
+// the dead window's marker. The board has to say so, because the player cannot
+// know whether some window still has the run open on screen: a takeover that
+// looked identical to a normal resume would leave the second window's writes
+// unexplained when they start being refused.
+func TestTakeoverOfAStaleMarkerIsSurfaced(t *testing.T) {
+	store := saveStore(t)
+	m, _, _ := savedAt(t, store, 4)
+	m = send(m, "q")
+	path, err := store.Path(testRunID)
+	if err != nil {
+		t.Fatalf("path for %s: %v", testRunID, err)
+	}
+	old := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(path+save.LockSuffix,
+		[]byte("pid 99999 on long-gone-machine\n"+old+"\n"), 0o600); err != nil {
+		t.Fatalf("plant stale marker: %v", err)
+	}
+	// The start-up path: the list is offered with no claim taken, and carrying
+	// on is where the stale marker gets taken over.
+	started := sizedModel(t, NewChrome(false, true), 1, 120, 30).
+		StartPersistence(SaveTarget{Store: store, RunID: testRunID})
+	resumed := send(started, "enter")
+	line := statusLineOf(resumed)
+	for _, want := range []string{"Carrying on", "Took over a save marker another window left behind",
+		"took over the save marker left by pid 99999 on long-gone-machine"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the takeover status is missing %q: %q", want, line)
+		}
+	}
+	if resumed.run == nil {
+		t.Fatal("carrying on after the takeover did not restore a run")
+	}
+}
+
 // TestContinueListOffersSavedRunsAndNewRunLeavesThem checks the start-up prompt:
 // it lists what is there, and starting a new run does not destroy it.
 func TestContinueListOffersSavedRunsAndNewRunLeavesThem(t *testing.T) {

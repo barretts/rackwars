@@ -18,6 +18,18 @@ type SaveTarget struct {
 	RunID string
 }
 
+// tookOver is the sentence a player needs after a claim that moved over a
+// marker some other window left behind: that window may still be showing the
+// run, and it cannot be allowed to look like it still owns the save. It returns
+// "" in the normal case, where nothing unusual happened.
+func tookOver(lock *save.Lock) string {
+	if lock == nil || lock.Note == "" {
+		return ""
+	}
+	return "Took over a save marker another window left behind (" + lock.Note +
+		"). If that window is still open it will be stopped before it can write over this one."
+}
+
 // WithStore attaches the save target and takes this instance's claim on the run,
 // so a second window opening the same folder is told about it rather than
 // silently overwriting it.
@@ -33,6 +45,9 @@ func (m Model) WithStore(t SaveTarget) Model {
 		return m
 	}
 	m.lock = lock
+	if note := tookOver(lock); note != "" {
+		m.status, m.statusBad = note, false
+	}
 	return m
 }
 
@@ -66,6 +81,9 @@ func (m Model) writeSave() Model {
 			return m.saveFailed(err)
 		}
 		m.lock = held
+		if note := tookOver(held); note != "" {
+			m.status, m.statusBad = note, false
+		}
 	}
 	f := save.Of(m.run, m.actions, m.store.Engine)
 	write := m.store.Save
@@ -189,6 +207,9 @@ func (m Model) continueRun() (Model, error) {
 	m.saves = nil
 	m.dayLog = nil
 	m.status = "Carrying on: seed " + itoa(int(m.seed)) + ", day " + itoa(run.State.Day) + "."
+	if note := tookOver(lock); note != "" {
+		m.status += " " + note
+	}
 	m.statusBad = false
 	m.saveErr = ""
 	return m, nil
@@ -212,6 +233,9 @@ func (m Model) recoverRun() (Model, error) {
 		return m, err
 	}
 	next.status = "Carrying on from the backup " + path + ". The damaged save is still on disk; the next write replaces it."
+	if note := tookOver(next.lock); note != "" {
+		next.status += " " + note
+	}
 	return next, nil
 }
 
@@ -240,6 +264,9 @@ func (m Model) adoptRun(id string, f save.File) (Model, error) {
 	m.savedTo = saveFileName(m.store, id)
 	m.restart = false
 	m.status = "Carrying on: seed " + itoa(int(m.seed)) + ", day " + itoa(run.State.Day) + "."
+	if note := tookOver(lock); note != "" {
+		m.status += " " + note
+	}
 	m.statusBad = false
 	return m, nil
 }

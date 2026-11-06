@@ -33,11 +33,11 @@ All tasks start unchecked. A checkbox means the work and its required evidence e
 
 ## Phase 4 — Persistence and replay
 
-- [ ] Implement versioned save/load, Continue, autosave, and save-and-quit.
-- [ ] Use OS-appropriate directories and a `--save-dir` override.
+- [x] Implement versioned save/load, Continue, autosave, and save-and-quit.
+- [x] Use OS-appropriate directories and a `--save-dir` override.
 - [ ] Preserve pending choices, random state, content version, and summary statistics.
-- [ ] Implement last-good backup, tested file replacement, recovery, and visible write failures.
-- [ ] Prevent concurrent writers from silently overwriting an active run.
+- [x] Implement last-good backup, tested file replacement, recovery, and visible write failures.
+- [x] Prevent concurrent writers from silently overwriting an active run.
 - [ ] Verify uninterrupted versus resumed traces, corrupt/incompatible saves, and both OS path behaviors.
 
 ## Phase 5 — Full GPU game
@@ -382,6 +382,164 @@ Open gaps and next owner:
      A live losing run is worth recording alongside the win.
   6. Carried from Phase 2 for Phase 6: the trading win is real but thin - the
      best of twelve seeds clears $1,042 after paying $13,310 of interest.
+Gate: incomplete
+```
+
+```text
+Phase: 4 - Persistence and replay
+Owner: omp session (expert-engineer-peirce)
+Commit/build and engine/content version: commit 2ebe167 on branch main, on top
+  of 021c1c5, 821ea52, a1bcf2c, d7ac9cc, 5973d2d and 9ab28b9 (Phases 1-3).
+  Save format SchemaVersion 1, engine `prototype-1`, content `campaign-1`;
+  saves are `run-<seed>.json` with `run-<seed>.json.bak` last-good copies and
+  `run-<seed>.json.lock` claim markers (line 1 `pid N on <host>`, line 2 an
+  RFC3339 heartbeat, stale after 45 minutes). Binary `rackwars 0.1.0-phase4`,
+  built with `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w
+  -X main.version=0.1.0-phase4" -o dist/rackwars.exe ./cmd/rackwars`. This
+  entry is committed together with the save-layer fixes described under
+  "Defects found" below, which the interactive runs here re-ran against.
+OS / architecture / terminal: Windows 11 build 26200, x64 (go1.26.0
+  windows/amd64, GOAMD64=v1, CGO_ENABLED=0). Interactive runs again used the
+  ConPTY pseudo-terminal started by the agent harness (wide layout, Git
+  Bash/MSYS parent); the Windows Terminal application window itself was not
+  driven, and no macOS host is reachable, so no darwin evidence exists.
+Commands, seed, or action trace:
+  Static: `gofmt -l cmd internal` (no output); `go vet ./...` (clean);
+  `git diff --check` (clean).
+  `go test ./... -count=1` -> ok rackwars/internal/content, game, save
+  (1.259s), sim, tui (3.127s). `go test -race ./... -count=1 -timeout 300s` ->
+  same five packages ok, no race reports (tui 14.083s).
+  New regression tests: `internal/save`
+  `TestTakeoverWindowCannotOverwriteAFileThatMoved` and `internal/tui`
+  `TestTakeoverOfAStaleMarkerIsSurfaced`; the first was verified to fail
+  against the pre-fix claim path ("wanted a clobbered failure, got none")
+  and pass after the fix.
+  Multi-process stress (separate throwaway module under
+  %TEMP%\rw-harness, `rwstress <dir> <mode> [gapms]` + `rwverify <dir>`,
+  not checked in):
+  - race5: window A `write 250` (20 writes, live marker) while a script
+    overwrote A's marker with an aged ghost stamp at t+2s; window C
+    `spinsame` -> CLAIMFAIL "... is already open by pid 21972 on
+    file-cabinet; close that RACK WARS window...", A completed WROTE 19/20
+    with its bytes intact: an externally aged marker cannot steal a run
+    from a live window.
+  - race6: window A `write1b` (day-1 position, then frozen heartbeat),
+    marker aged externally (genuinely stale), window C `write 300` ->
+    clean takeover, 20/20 writes, `rwverify` -> "OK seed-1 day 9 cash 0
+    debt 31211 over repossessed"; a blind third window then claimed and
+    was refused "already holds that run on day 9, further than day 2, so
+    nothing was overwritten...", file unchanged.
+  - Interrupted-replacement rerun after the fixes: `spinsame` plus a
+    NtSuspendProcess watcher caught the writer mid-replacement 3/3 times
+    (`SUSPENDED tmp=run-seed-1.tmp-<pid> size=2225`); the orphan tmp was
+    never adopted by `List` and the active file was loadable at every
+    kill point.
+  Live binary scenario, seed 1, %TEMP%\rw-ev2 (rebuilt 0.1.0-phase4 exe,
+  one key per ConPTY write):
+  - rwE: startup -> day-1 board + `run-seed-1.json` + lock
+    "pid 18648 on file-cabinet"; `S` -> quit note naming the path, exit
+    code 0, lock removed, `.bak` created.
+  - A dead window's marker was planted (line 1 "pid 99999 on
+    ghost-machine", heartbeat 46 minutes old). rwF onto the same folder
+    -> Continue list -> enter -> takeover: lock line 1 became
+    "pid 13828 on file-cabinet" with a fresh heartbeat, and the board
+    status read "Carrying on: seed 1, day 1. Took over a save marker
+    another window left behind (took ..." (frame width truncates the
+    tail). `e`+enter closed the day; the next window's list showed the
+    autosave: "day 2/30 cash $10,000 debt $22,000 ... still open written
+    2026-11-05T19:24:06-06:00".
+  - rwG (second window, same folder and seed) -> enter -> refused in
+    place: "That run cannot be opened: ...\run-seed-1.json is already
+    open by pid 13828 o...", stayed on the list, `q` exit 0. rwF `q` ->
+    exit 0, lock released; final `rwverify` -> "OK seed-1 day 3 cash
+    10000 debt 24200 over open".
+  Default-directory smoke, live: `./dist/rackwars.exe --seed 1` with no
+  `--save-dir` -> first save + live lock under
+  `%APPDATA%\rackwars\saves\` (verified via rwverify: "OK seed-1 day 1
+  cash 10000 debt 20000 over open"), a day close wrote the day-2 file
+  plus `.bak`, clean quit released the lock; the test files were deleted
+  afterwards.
+Observed result:
+  One live writer per run: a second window is turned away naming the
+  holder pid (live rwG, scripted race5, `TestSecondWindowIsTurnedAway`);
+  takeover only happens on a genuinely stale heartbeat, and the takeover
+  window says so on the board (live rwF,
+  `TestTakeoverOfAStaleMarkerIsSurfaced`); a claimant - takeover or
+  blind - cannot overwrite bytes that moved after its claim: the save is
+  refused ("changed since this window last saved it, so nothing was
+  overwritten", hash-verified byte-identical file, `.bak` intact,
+  `TestTakeoverWindowCannotOverwriteAFileThatMoved`); replacement is
+  tmp+rename with retry, so interrupted runs leave either the whole old
+  or the whole new file (3/3 kill-mid-replacement catches,
+  `TestInterruptedKeyboardRunCarriesOnToTheSameEnding`); every overwrite
+  keeps the previous bytes in `.bak`, and the damaged-save flow reports
+  the damage and can recover the backup
+  (`TestDamagedSaveIsReportedAndRecoverable`, live `.bak` appearances);
+  autosave failures are visible and retryable
+  (`TestFailedAutosaveIsVisibleAndRetryable`); unknown schema versions are
+  refused rather than half-read (`TestUnsupportedVersionsAreRefused`).
+  Documented semantics: a takeover window may write over a file that has
+  not moved since its claim - that is the point of taking over, and the
+  old bytes live in `.bak`; only a file that moved post-claim is refused.
+  Defects found and fixed while producing this evidence:
+  1. A fresh claim did not baseline the bytes on disk, so a takeover
+     window could silently overwrite a save that had moved since the
+     claim (same-day variants included). `Hold` now records the existing
+     hash on both claim paths; the regression test fails pre-fix, passes
+     post-fix.
+  2. The heartbeat re-touch truncated the marker to zero between truncate
+     and rewrite, so a reader could catch an empty marker and deem a live
+     run stale. `Touch` is now tmp+rename, atomically whole-marker.
+  3. `Hold` could steal a marker that had only looked stale for an
+     instant; it now re-reads after 100ms and, if the holder revalidated,
+     refuses naming it (race5 shows this live: the externally aged marker
+     was rewritten by the live holder before the stealer's second read).
+  4. Stale-marker takeover was silent: the board never said it happened.
+     The note now surfaces at all five claim sites (startup claim,
+     re-claim on first save, Continue, new-run adopt, recover).
+  5. The stress harness had swapped argument handling (`<mode> <dir>`
+     vs the documented `<dir> <mode>`), which silently no-opped earlier
+     scenario invocations. Consequence: the prior session's `race1` log
+     claiming a blind same-day silent overwrite is discounted as
+     evidence (harness artifact); the invariant itself was real, was
+     fixed (defect 1), and is now proven by the unit regression and the
+     live scenarios above.
+  ConPTY harness quirks (input side, not product defects): an empty
+  stdin write lands as two Enters, and a bare Enter closes the day
+  immediately (`[enter] face morning` is a live binding), so two live
+  windows closed one extra day from a doubled Enter; the product's
+  duplicate-day-commit guard covers a single key event and was not
+  bypassed. `q` once needed a repeat write for the same reason.
+Open gaps and next owner:
+  1. No macOS evidence of any kind. On a darwin host: `go test ./... -count=1`
+     and `-race`; live save/quit/resume, second-window refusal and
+     stale-marker takeover in Terminal.app saving to
+     `$HOME/Library/Application Support/rackwars/saves`; a real resize
+     (SIGWINCH) observation. Windows Terminal application-window
+     interactive evidence is also still owed everywhere (ConPTY harness
+     only).
+  2. All live driving above was keystrokes scripted by the agent; the
+     Phase 3/4 human keyboard-only 30-day run on both primary OSes
+     remains open.
+  3. Unchecked row 3: the format carries a `pending` field and `Load`
+     refuses a file whose pending choice this build cannot present, but
+     no prototype code writes a non-empty `pending` and the `pending`-kind
+     refusal has no test. State, random stream, content version and
+     statistics are proven; the pending half is why the row stays open.
+  4. `SchemaVersion 1` is accepted exactly; there is no migrator yet
+     (none is needed while v1 is the only version, Phase 5 will need one).
+  5. `.github/workflows/ci.yml` has still never executed (no remote);
+     next owner pushes and records the run URL.
+  6. Cosmetic: a long takeover note can exceed the status line (frame
+     truncates with the `...` marker), and a `NOT ON DISK`-prefixed save
+     failure can push one row past the frame height; the lock-refresh
+     failure after a successful data write can surface one frame as a
+     lock-kind refusal although the bytes landed (the next autosave
+     clears it).
+  7. `continueRun` does not clear the restart flag the way `adoptRun`
+     does, so the exotic `n` (new run) -> pick Continue sequence keeps a
+     restart-flavoured save (one allowed backwards write) until the next
+     normal save; noted, no behaviour change made.
 Gate: incomplete
 ```
 

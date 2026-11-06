@@ -252,6 +252,7 @@ func (s *Store) Hold(id string) (*Lock, error) {
 	}
 	l, err := take()
 	if err == nil {
+		s.recordExisting(path)
 		return l, nil
 	}
 	if !errors.Is(err, fs.ErrExist) {
@@ -270,8 +271,24 @@ func (s *Store) Hold(id string) (*Lock, error) {
 				path, who.text),
 		}
 	}
-	// Stale or unreadable: remove and claim it once more. If the claim still
-	// fails, another instance won the race and refusing is correct.
+	// Stale or unreadable. A marker can also look empty in the moment another
+	// window is creating or refreshing it, so before deciding the owner is gone,
+	// look once more after a beat: stealing the marker of a live window is the
+	// worse mistake, and a marker that only looked dead because somebody was
+	// mid-rewrite looks complete again by now.
+	time.Sleep(100 * time.Millisecond)
+	if who2, when2 := readLock(lockPath); !when2.IsZero() && time.Since(when2) < StaleLock && !who2.empty {
+		return nil, &Failure{
+			Kind: "busy", Path: path, Err: err,
+			Message: fmt.Sprintf("%s is already open by %s; close that RACK WARS window before opening this run again.",
+				path, who2.text),
+		}
+	} else if !who2.empty || !when2.IsZero() {
+		who = who2
+	}
+	// Stale or unreadable after the second look: remove and claim it once more.
+	// If the claim still fails, another instance won the race and refusing is
+	// correct.
 	_ = os.Remove(lockPath)
 	l, err = take()
 	if err != nil {
@@ -280,16 +297,49 @@ func (s *Store) Hold(id string) (*Lock, error) {
 			Message: fmt.Sprintf("%s is already open by another RACK WARS instance; only one window may save a run at a time.", path),
 		}
 	}
+	s.recordExisting(path)
 	return &Lock{Path: lockPath, Holder: holder,
 		Note: fmt.Sprintf("took over the save marker left by %s", who.text)}, nil
 }
 
-// Touch refreshes the heartbeat; Save calls it.
+// recordExisting baselines a save file that is already on disk the moment a
+// window claims the run. The clobber guard can only compare against a hash this
+// store has recorded, so without a claim-time baseline a window that claimed a
+// run it never loaded would sit outside the guard entirely: the first write the
+// other window lands after the takeover would pass the blind window's guard,
+// not trip it. With the baseline, any file movement the holder makes after the
+// claim is exactly what the blind window's next save refuses to overwrite, and
+// the holder keeps sole write authority. A takeover writer can still replace a
+// file that has not moved since the claim (its position is one the player could
+// have continued into, which is what a takeover is for), and that replacement
+// keeps the previous file as the .bak copy the continue list recovers from.
+func (s *Store) recordExisting(path string) {
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	if h, err := hashOf(path); err == nil {
+		s.written[path] = h
+	}
+}
+
+// Touch refreshes the heartbeat; Save calls it. The rewrite goes through a
+// sibling temp file and a rename, never a truncate of the marker in place: a
+// reader that caught the marker mid-truncate would see an empty file, decide a
+// live window had died, and steal its run. A rename shows readers either the
+// old marker whole or the new one whole.
 func (l *Lock) Touch() error {
 	if l == nil || l.released {
 		return nil
 	}
-	if err := os.WriteFile(l.Path, []byte(l.Holder+"\n"+time.Now().Format(time.RFC3339)+"\n"), 0o600); err != nil {
+	buf := []byte(l.Holder + "\n" + time.Now().Format(time.RFC3339) + "\n")
+	tmp := l.Path + ".tmp-" + strconv.Itoa(os.Getpid())
+	if err := writeSynced(tmp, buf); err != nil {
+		_ = os.Remove(tmp)
+		return &Failure{Kind: "lock", Path: l.Path, Err: err,
+			Message: "the marker saying this run is open could not be refreshed; another window may be able to open it too."}
+	}
+	if err := replaceWithRetry(tmp, l.Path); err != nil {
+		_ = os.Remove(tmp)
 		return &Failure{Kind: "lock", Path: l.Path, Err: err,
 			Message: "the marker saying this run is open could not be refreshed; another window may be able to open it too."}
 	}

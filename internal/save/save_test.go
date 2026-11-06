@@ -429,6 +429,122 @@ func TestLockingBlocksASecondWindowAndTakesOverAStaleOne(t *testing.T) {
 	_ = fifth.Release()
 }
 
+// TestTakeoverWindowCannotOverwriteAFileThatMoved is the multi-window rule the
+// continue list promises: after a window takes over a stale marker, it may
+// replace a file that has not moved since its claim (that is what taking over
+// means, and the previous copy goes to the .bak the list recovers from), but
+// once the original window writes again the takeover window must refuse, not
+// silently land on top of a fresher position. Without the claim-time baseline
+// the takeover window sat outside the clobber guard entirely and its next write
+// would have passed over the newer file unseen.
+func TestTakeoverWindowCannotOverwriteAFileThatMoved(t *testing.T) {
+	s := testStore(t)
+	id := "blind-slot"
+	path := mustPath(t, s, id)
+	lockA, err := s.Hold(id)
+	if err != nil {
+		t.Fatalf("first window claim: %v", err)
+	}
+
+	// Window one plays the afternoon and writes it out.
+	afternoon, accepted := playRun(t, sampleActions())
+	if err := s.Save(id, Of(afternoon, accepted, s.Engine), lockA); err != nil {
+		t.Fatalf("first window save: %v", err)
+	}
+	first, err := hashOf(path)
+	if err != nil {
+		t.Fatalf("hash first file: %v", err)
+	}
+
+	// Window one is crash-killed leaving its marker; the heartbeat goes stale.
+	stale := path + LockSuffix
+	old := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(stale, []byte("pid 99999 on long-gone-machine\n"+old+"\n"), 0o600); err != nil {
+		t.Fatalf("plant stale marker: %v", err)
+	}
+
+	// A second, separate window claims the run without ever loading the file -
+	// the takeover claim - then window one is resurrected and writes a fresher
+	// same-day position of its own.
+	s2, err := NewStore(s.Dir, "blind-window")
+	if err != nil {
+		t.Fatalf("second store: %v", err)
+	}
+	lockB, err := s2.Hold(id)
+	if err != nil {
+		t.Fatalf("takeover claim: %v", err)
+	}
+	if !strings.Contains(lockB.Note, "took over") {
+		t.Fatalf("the takeover claim reported no note: %+v", lockB)
+	}
+	later, laterActs := playRun(t, []game.Action{
+		{Kind: game.ActTravel, Market: content.Ashburn},
+		{Kind: game.ActBorrow, Amount: 5000},
+		{Kind: game.ActBuy, Product: content.Card4090, Qty: 2},
+		{Kind: game.ActStay},
+		{Kind: game.ActStay},
+	})
+	if later.State.Day != afternoon.State.Day {
+		t.Fatalf("setup: window one's later position is day %d, the file is day %d; the test needs the same day",
+			later.State.Day, afternoon.State.Day)
+	}
+	if err := s.Save(id, Of(later, laterActs, s.Engine), lockA); err != nil {
+		t.Fatalf("window one's later write: %v", err)
+	}
+	second, err := hashOf(path)
+	if err != nil {
+		t.Fatalf("hash moved file: %v", err)
+	}
+	if second == first {
+		t.Fatal("window one's later write did not actually change the file")
+	}
+
+	// The takeover window now writes its own same-day position. The file moved
+	// after its claim, so this must be a visible refusal, and the fresher file
+	// must survive it untouched.
+	blind, blindActs := playRun(t, []game.Action{
+		{Kind: game.ActTravel, Market: content.Ashburn},
+		{Kind: game.ActBorrow, Amount: 4000},
+		{Kind: game.ActBuy, Product: content.Card4090, Qty: 2},
+		{Kind: game.ActStay},
+		{Kind: game.ActStay},
+	})
+	if blind.State.Day != later.State.Day {
+		t.Fatalf("setup: blind position is day %d, want %d", blind.State.Day, later.State.Day)
+	}
+	f := kindOf(t, s2.Save(id, Of(blind, blindActs, s2.Engine), lockB), "clobbered")
+	if !strings.Contains(f.Message, "so nothing was overwritten") {
+		t.Fatalf("the refusal does not say the file was left alone: %s", f.Message)
+	}
+	if now, _ := hashOf(path); now != second {
+		t.Fatal("the refusal still wrote over window one's fresher file")
+	}
+	if _, err := hashOf(path + BakSuffix); err != nil {
+		t.Fatalf("the backup copy beside the run vanished: %v", err)
+	}
+	// Window one still holds the pen: a legitimate forward write from it lands
+	// normally, which is what refusing the blind window protects.
+	forward, forwardActs := playRun(t, []game.Action{
+		{Kind: game.ActTravel, Market: content.Ashburn},
+		{Kind: game.ActBorrow, Amount: 5000},
+		{Kind: game.ActBuy, Product: content.Card4090, Qty: 2},
+		{Kind: game.ActStay},
+		{Kind: game.ActStay},
+		{Kind: game.ActStay},
+	})
+	if forward.State.Day != later.State.Day+1 {
+		t.Fatalf("setup: forward position is day %d, want %d", forward.State.Day, later.State.Day+1)
+	}
+	if err := s.Save(id, Of(forward, forwardActs, s.Engine), lockA); err != nil {
+		t.Fatalf("window one was not left as the writer it is: %v", err)
+	}
+	if moved, _ := hashOf(path); moved == second {
+		t.Fatal("window one's legitimate forward write did not land")
+	}
+	_ = lockB.Release()
+	_ = lockA.Release()
+}
+
 func TestUnsupportedVersionsAreRefused(t *testing.T) {
 	r, actions := playRun(t, nil)
 	original := Of(r, actions, "test")
