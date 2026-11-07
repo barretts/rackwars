@@ -298,7 +298,7 @@ func TestFailedWriteKeepsTheRunAndSaysHowToRetry(t *testing.T) {
 	if !strings.Contains(fail.Message, "still in memory") || !strings.Contains(fail.Message, "--save-dir") {
 		t.Fatalf("the save failure does not tell the player what to do: %s", fail.Message)
 	}
-	if !strings.Contains(fail.Message, "Retry") {
+	if !strings.Contains(fail.Message, "to try again") {
 		t.Fatalf("the save failure offers no retry: %s", fail.Message)
 	}
 

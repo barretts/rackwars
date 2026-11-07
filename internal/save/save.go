@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"rackwars/internal/content"
@@ -473,7 +474,11 @@ func (s *Store) save(id string, f File, lock *Lock, restart bool) error {
 					Message: fmt.Sprintf("could not keep the previous copy of %s: %v. Nothing was overwritten.", path, err)}
 			}
 		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	} else if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+		// Windows answers a path through a file with ERROR_PATH_NOT_FOUND (not
+		// exist); macOS and Linux answer ENOTDIR. Both mean the same thing to
+		// the player: nothing is there to read yet, and the write attempt that
+		// follows will fail with the actionable "still in memory" advice.
 		return &Failure{Kind: "write", Path: path, Err: err,
 			Message: fmt.Sprintf("cannot read the existing save %s: %v. Nothing was overwritten.", path, err)}
 	}
