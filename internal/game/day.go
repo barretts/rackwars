@@ -13,10 +13,12 @@ type TravelPreview struct {
 	Freight       Money            `json:"freight"`
 	PerSlotCharge Money            `json:"perSlotCharge"`
 	RouteFee      Money            `json:"routeFee"`
-	OccupiedSlots int              `json:"occupiedSlots"`
-	SlotsTotal    int              `json:"slotsTotal"`
-	// NextLease is shown as information: arriving does not charge another day's
-	// rent, and the trading prototype charges no lease at all.
+	FleetSlots    int              `json:"fleetSlots"`
+	// HostCap is the destination's hosting slots: how much of the fleet can
+	// run there at night. It never blocks arrival; it only bounds hosting.
+	HostCap int `json:"hostCap"`
+	// NextLease is shown as information: arriving does not charge another
+	// day's rent, and the trading prototype charges no lease at all.
 	NextLease  Money `json:"nextLease"`
 	Interest   Money `json:"interest"`
 	HostedHere Money `json:"hostedHere"`
@@ -31,8 +33,9 @@ type TravelPreview struct {
 	Reason         Reason `json:"reason"`
 }
 
-// PreviewTravel quotes a one-day move. Moving to a smaller site is blocked
-// before confirmation: there is no hidden storage penalty to discover later.
+// PreviewTravel quotes a one-day move. The fleet always travels — a small
+// site never turns the truck away; it just hosts less of the fleet when the
+// night comes. Slots bill freight, so the footprint is shown, not hidden.
 func (r *Run) PreviewTravel(to content.MarketID) TravelPreview {
 	mi := r.MarketIndex(to)
 	pv := TravelPreview{From: r.State.Market, To: to, Reason: ReasonRunOver}
@@ -45,10 +48,10 @@ func (r *Run) PreviewTravel(to content.MarketID) TravelPreview {
 	}
 	dest := content.MarketOf(to)
 	pv.RouteFee = Money(content.RouteFee(r.State.Market, to))
-	pv.OccupiedSlots = r.SlotsUsed()
-	pv.PerSlotCharge = Money(content.PerSlotFreight * pv.OccupiedSlots)
+	pv.FleetSlots = r.SlotsUsed()
+	pv.PerSlotCharge = Money(content.PerSlotFreight * pv.FleetSlots)
 	pv.Freight = pv.RouteFee + pv.PerSlotCharge
-	pv.SlotsTotal = dest.Slots
+	pv.HostCap = dest.Slots
 	pv.NextLease = Money(dest.DailyLease)
 	pv.Interest = ceil10(r.State.Debt)
 	pv.CashAfter = r.State.Cash - pv.Freight
@@ -63,13 +66,8 @@ func (r *Run) PreviewTravel(to content.MarketID) TravelPreview {
 	// Customs checks departures from Huaqiangbei carrying GPUs — arriving is
 	// shopping, and the empty coat is exempt by rule. The number shown here
 	// is the exact number the roll uses (customsRoll).
-	if r.cfg.Rules.Encounters && r.State.Market == content.Huaqiangbei && to != content.Huaqiangbei && pv.OccupiedSlots > 0 {
+	if r.cfg.Rules.Encounters && r.State.Market == content.Huaqiangbei && to != content.Huaqiangbei && pv.FleetSlots > 0 {
 		pv.RiskNote = "customs risk " + itoa(r.customsRoll()) + "% on this shipment"
-	}
-
-	if pv.OccupiedSlots > dest.Slots {
-		pv.Reason = ReasonOvercapacity
-		return pv
 	}
 	pv.Valid = true
 	pv.Reason = ReasonOK
@@ -82,24 +80,28 @@ func (r *Run) PreviewTravel(to content.MarketID) TravelPreview {
 // commits, so preview and receipt are one arithmetic. A preview that could
 // drift from settlement would be the oldest con in datacenter history.
 type StayPreview struct {
-	Market    content.MarketID `json:"market"`
-	Mode      StayMode         `json:"mode"`
-	Lease     Money            `json:"lease"`
-	Electric  Money            `json:"electric"`
-	Hosted    Money            `json:"hosted"`
-	Curtail   Money            `json:"curtail"`
-	Clawback  Money            `json:"clawback"`
-	Interest  Money            `json:"interest"`
-	Powered   []int            `json:"powered,omitempty"`
-	PowerKW   int64            `json:"powerKw100"`
-	PowerCap  int64            `json:"powerCapKw100"`
-	Eligible  bool             `json:"eligible"`
-	Clean     bool             `json:"clean"`
-	CashAfter Money            `json:"cashAfter"`
-	DebtAfter Money            `json:"debtAfter"`
-	Heat      int              `json:"heat"`
-	Reason    Reason           `json:"reason,omitempty"`
-	Valid     bool             `json:"valid"`
+	Market   content.MarketID `json:"market"`
+	Mode     StayMode         `json:"mode"`
+	Lease    Money            `json:"lease"`
+	Electric Money            `json:"electric"`
+	Hosted   Money            `json:"hosted"`
+	Curtail  Money            `json:"curtail"`
+	Clawback Money            `json:"clawback"`
+	Interest Money            `json:"interest"`
+	Powered  []int            `json:"powered,omitempty"`
+	// HostedSlots and SlotCap put the night's rack footprint against the
+	// site's hosting capacity; the meter has its pair above.
+	HostedSlots int    `json:"hostedSlots"`
+	SlotCap     int    `json:"slotCap"`
+	PowerKW     int64  `json:"powerKw100"`
+	PowerCap    int64  `json:"powerCapKw100"`
+	Eligible    bool   `json:"eligible"`
+	Clean       bool   `json:"clean"`
+	CashAfter   Money  `json:"cashAfter"`
+	DebtAfter   Money  `json:"debtAfter"`
+	Heat        int    `json:"heat"`
+	Reason      Reason `json:"reason,omitempty"`
+	Valid       bool   `json:"valid"`
 }
 
 // stayPlan resolves the night: which GPUs run, whether the grid operator's
@@ -145,6 +147,9 @@ func (r *Run) stayPlan(mode StayMode, powered []int) (chosen []int, curtail Mone
 		if content.MarketOf(m).PowerKW > 0 && poweredKW100(r.cfg.Products, powered) > content.MarketOf(m).PowerKW {
 			return nil, 0, ReasonPowerOver
 		}
+		if hostSlots(r.cfg.Products, powered) > content.MarketOf(m).Slots {
+			return nil, 0, ReasonOvercapacity
+		}
 		chosen = powered
 	}
 	return chosen, curtail, ReasonOK
@@ -180,6 +185,8 @@ func (r *Run) PreviewStayMode(mode StayMode, powered []int) StayPreview {
 	pv.Powered = chosen
 	pv.PowerKW = poweredKW100(r.cfg.Products, chosen)
 	pv.PowerCap = content.MarketOf(m).PowerKW
+	pv.HostedSlots = hostSlots(r.cfg.Products, chosen)
+	pv.SlotCap = content.MarketOf(m).Slots
 	pv.Eligible = r.hostEligible(m)
 	pv.Clean = r.State.Heat < 60
 	pv.Electric = elecCostDollars(pv.PowerKW, content.MarketOf(m).ElecCentsPerKWh)

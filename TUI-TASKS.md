@@ -791,4 +791,73 @@ Blast radius and fixes:
 Gate: unchanged - still incomplete for the same open gaps as Phase 5.
 ```
 
+## Addendum - prose wrapping, slots-host-never-fence, card facts in the table (owner directives, 2026-11-06)
+
+```text
+Three owner-directed changes ship together.
+
+A - wrapping contract ("never truncate my news again"): board prose wraps
+word-by-word onto continuation lines (wrapFlow/wrapPad in internal/tui/view,
+runewidth-aware), columns never do. Headline, warning, hosting/meter/alloc
+lines, the status line, and the keys line all wrap; the table keeps its fixed
+cell widths. When the window is too short, the keys line survives last and a
+middle-tail notice counts the hidden wrapped lines ("N wrapped line(s) hidden
+by the window height; resize to read them"). Pinned by TestProseWrapsInsteadOf
+Truncating, TestFitHeightKeepsKeysVisible, TestWrapFlowCutsOverlongWords.
+
+B - slots are hosting capacity, not an inventory fence. Owner: "you should be
+able to buy unlimited cards, but only host the slots available, and you should
+be able to move with the cards." Engine: BuyLimits fences a buy by cash and
+shelf stock only; travel is never blocked by fleet size (arrival fence and the
+storage-legality resume check deleted); freight keeps its bill, route fee plus
+$50 x fleet slot footprint (SlotsUsed survives as that footprint). A hosted
+night must fit BOTH the meter and the site's Market.Slots: stayPlan refuses an
+explicit subset over the racks (ReasonOvercapacity, "over the site's slots"),
+and AUTO packs the best-paying subset under both caps with an exact 2D 0/1
+knapsack (hosting.go bestPowered; count-clipped items, deterministic recovery,
+preview == settlement == replay). TravelPreview fields renamed to their new
+meaning (FleetSlots, HostCap); StayPreview gained hostedSlots/slotCap. TUI
+reframes: header "fleet N racks M", buy box "… 2 slots fleet 0" with the shop
+wall only, travel option "hosts 16", night plan "slots 8" plus "hosting H/C
+slots", the subset editor is "WHICH CARDS RUN TONIGHT?". Oversized saves are
+legal resumes (illegal-save fence that rejected them deleted - it was a data-
+loss bug). New pins: TestOversizedFleetStillTravels (16-slot fleet into the
+garage: valid, footprint freight), TestAutoHostRackCapBindsBeforeMeter (20
+mods on Ashburn's 16 racks: exactly 16, twice, identically), TestExplicitSubse
+tRackBoundary (fill to the last rack; one more refuses without burning the
+day; meter provably not the wall), TestBuyUnlimitedBySlotsShelfIsTheWall,
+TestResumeAcceptsFleetLargerThanAnyTown (400 sleds resume).
+
+C - the product table now carries the card details the hosting rule needs at
+a glance: three new columns KW (per-unit draw), HOST/NGT (ordinary gross
+hosting per night), CLASS (CON/ENT/MOD), taken straight from the content
+definitions in snapshot(); pinned cell-for-cell at 80 columns by
+TestProductTableCarriesCardFacts (row 79 chars, never re-wrapped by the prose
+contract).
+
+Blast radius: the recorded prototype traces re-recorded by the gate tests as
+designed - the policy line is identical but unconstrained buying is visible
+(seed-1 trade-repay buys 24 sleds where the old slot fence stopped it at 12,
+carries a 48-52-slot fleet, sells into the spike, and cashes out $131,375 vs
+$64,152). The 1..40 full-rules sweep was re-derived after the rule change:
+all three archetypes still close AND win on all 40 seeds, so the pinned six
+{5,16,18,25,27,33} stay and full_gate_test.go's comment records the new sweep.
+RACK-WARS.md carries the rewritten capacity/freight/invariant lines.
+
+Live smoke (ConPTY harness, same caveats as Phase 5): rebuilt exe
+`rackwars 0.1.0-phase5.2`, fresh seed-1 full board paints the six-row table
+with KW/HOST/NGT/CLASS ("H100 … 0.90 $350 ENT") and header "fleet 0 racks 8";
+buying out the 16-sled shelf in the 8-rack garage is accepted ("the engine
+will take 16 here"; fleet 32 racks 8); the night plan shows AUTO "power 1.60/
+2.00 kW hosted +$160" with the tail wrapped to "hosting 2/8 slots"; the
+oversized fleet then travels to Ashburn unblocked ("Traveled to Ashburn;
+freight $1,850" = 250 + 32x50) where AUTO hosts 11.20 of 12.00 kW for +$1,120.
+Long prose reaches the player whole and wrapped - the merger warning runs
+"…Used-card prices" / "are likely to fall." across two board lines with no
+ellipsis. `go vet`, `go test ./... -count=1` and
+`go test -race -timeout 300s ./... -count=1` all green.
+Gate: incomplete - the same open gaps as Phase 5 (ConPTY harness only; macOS
+and human-play rows open).
+```
+
 Optional content remains outside the base-release gates.

@@ -287,6 +287,143 @@ func TestLongHeadlineAndNumbersStayInsideColumns(t *testing.T) {
 	}
 }
 
+// TestProductTableCarriesCardFacts pins the owner's card-details request: every
+// board row names the card's per-unit draw, ordinary per-night hosting, and
+// class in fixed columns, so pricing a night never needs a second document.
+func TestProductTableCarriesCardFacts(t *testing.T) {
+	m := testModel(NewChrome(false, false))
+	b := m.snapshot()
+	um, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: MinHeight})
+	mm := um.(Model)
+	lines := mm.mainLines(b, 80)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "HOST/NGT") || !strings.Contains(joined, "CLASS") {
+		t.Fatalf("the table header lost the card facts:\n%s", joined)
+	}
+	check := func(t *testing.T, lines []string, want struct {
+		name, kw, host, class string
+	}) {
+		t.Helper()
+		var found bool
+		for _, l := range lines {
+			cells := []rune(ansi.Strip(l))
+			if len(cells) < 78 || string(cells[2:14]) != fmt.Sprintf("%12s", want.name) {
+				continue
+			}
+			found = true
+			if got := string(cells[57:63]); got != fmt.Sprintf("%6s", want.kw) {
+				t.Errorf("%s kW column %q, want %q", want.name, got, want.kw)
+			}
+			if got := string(cells[64:72]); got != fmt.Sprintf("%8s", want.host) {
+				t.Errorf("%s host column %q, want %q", want.name, got, want.host)
+			}
+			if got := string(cells[73:78]); got != fmt.Sprintf("%5s", want.class) {
+				t.Errorf("%s class column %q, want %q", want.name, got, want.class)
+			}
+		}
+		if !found {
+			t.Errorf("no board row named %q:\n%s", want.name, strings.Join(lines, "\n"))
+		}
+	}
+	for _, want := range []struct{ name, kw, host, class string }{
+		{"3090 SLED", "1.60", "$160", "CON"},
+		{"4090", "0.50", "$70", "CON"},
+		{"H100", "0.90", "$350", "ENT"},
+	} {
+		check(t, lines, want)
+	}
+	// The mod and the second enterprise card only reach a board in the full
+	// five-market game, where the shop shelves all six products.
+	fm := mustFullModel(t, 1)
+	flines := fm.mainLines(fm.snapshot(), 80)
+	for _, want := range []struct{ name, kw, host, class string }{
+		{"4090-48 MOD", "0.60", "$90", "MOD"},
+		{"MI300", "1.00", "$250", "ENT"},
+	} {
+		check(t, flines, want)
+	}
+}
+
+// TestProseWrapsInsteadOfTruncating is the owner's complaint made permanent:
+// a news headline and a deal warning longer than the screen must reach the
+// player whole, word for word, instead of dying at an ellipsis.
+func TestProseWrapsInsteadOfTruncating(t *testing.T) {
+	m := testModel(NewChrome(false, false))
+	b := m.snapshot()
+	b.Headline = strings.Repeat("STARGATE ANNOUNCES A VERY LARGE NUMBER ", 12)
+	b.Warning = "CheapSeek's enterprise deal: sign now for $8,000,000 down; " +
+		"the signed deal adds $8,000,000 cash and $6,000,000 debt; the site is " +
+		"tied for 30 days; breaking early repays everything and costs $2,400,000."
+	um, _ := m.Update(tea.WindowSizeMsg{Width: MinWidth, Height: 40})
+	mm := um.(Model)
+	lines := mm.mainLines(b, MinWidth)
+	joined := strings.Join(lines, " ")
+	if strings.Contains(joined, "…") || strings.Contains(joined, "...") {
+		t.Errorf("wrapped prose lost words to an ellipsis:\n%s", strings.Join(lines, "\n"))
+	}
+	if got := strings.Count(joined, "STARGATE"); got != 12 {
+		t.Errorf("headline repeats: got %d, want 12:\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := strings.Count(joined, "repays"); got != 1 {
+		t.Errorf("warning tail missing (found %d):\n%s", got, strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(joined, "$2,400,000.") {
+		t.Errorf("warning's last figure cut:\n%s", strings.Join(lines, "\n"))
+	}
+	if got := strings.Count(joined, "tied for 30 days"); got != 1 {
+		t.Errorf("deal terms missing:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// TestFitHeightKeepsKeysVisible: when wrapped prose overruns the screen the
+// frame still ends on the key line — the board's hands must stay reachable —
+// and the player is told how much fell off.
+func TestFitHeightKeepsKeysVisible(t *testing.T) {
+	m := testModel(NewChrome(false, false))
+	b := m.snapshot()
+	b.Headline = strings.Repeat("A LONG STORM OF NUMBERS AND RUIN ", 40)
+	um, _ := m.Update(tea.WindowSizeMsg{Width: MinWidth, Height: MinHeight})
+	mm := um.(Model)
+	lines := mm.fitHeight(mm.mainLines(b, MinWidth))
+	if len(lines) != MinHeight {
+		t.Fatalf("frame is %d lines, want %d", len(lines), MinHeight)
+	}
+	last := ansi.Strip(lines[len(lines)-1])
+	if !strings.Contains(last, "[b]uy") {
+		t.Errorf("key line missing from the bottom:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(ansi.Strip(lines[MinHeight-2]), "hidden") {
+		t.Errorf("no notice of hidden lines:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// TestWrapFlowCutsOverlongWords: prose with no spaces at all (a board's
+// headline could carry a long URL-like token) still cannot exceed the width,
+// and no cells are lost by the cut.
+func TestWrapFlowCutsOverlongWords(t *testing.T) {
+	c := NewChrome(false, false)
+	s := strings.Repeat("X", 255)
+	lines := c.wrapFlow(s, 80)
+	if got := strings.Join(lines, ""); got != s {
+		t.Errorf("force-cut lost or reordered cells: %q", got)
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w > 80 {
+			t.Errorf("line %d is %d cells", i, w)
+		}
+	}
+	words := strings.Repeat("alpha bravo charlie ", 30)
+	out := c.wrapFlow(words, 40)
+	if got := strings.Join(out, " "); got != strings.TrimSpace(words) {
+		t.Errorf("word wrap lost words:\n%q", got)
+	}
+	for i, l := range out {
+		if w := ansi.StringWidth(l); w > 40 {
+			t.Errorf("line %d is %d cells: %q", i, w, l)
+		}
+	}
+}
+
 func TestHelpOverlayFitsMinimumSize(t *testing.T) {
 	m := send(testModel(NewChrome(false, false)), "?")
 	lines := frameLines(t, m)

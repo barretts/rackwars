@@ -145,8 +145,8 @@ func refusal(a game.Action, res game.Result) string {
 	case game.ReasonInsufficientCash:
 		return "That costs more than you have: short " + game.FormatMoney(res.ShortCash) + "."
 	case game.ReasonOvercapacity:
-		return "That will not fit in the rack: " + itoa(res.ShortSlots) + " slot" +
-			plural(res.ShortSlots) + " short."
+		return "The site cannot host that many racks: the night's set will not " +
+			"fit its slots. Leave the rest switched off or ride on."
 	case game.ReasonInsufficientStock:
 		return "The shop cannot sell you that many: " + itoa(res.ShortStock) + " short."
 	case game.ReasonInsufficientOwned:
@@ -495,7 +495,7 @@ func (m Model) handleStayKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Hand-picking cards is a power-on decision; off and curtail run
 		// nothing, so there is nothing to pick.
 		if m.stayMode != game.StayAuto {
-			m.status, m.statusBad = "Switch the plan back to AUTO to pick which racks run.", true
+			m.status, m.statusBad = "Switch the plan back to AUTO to pick which cards run.", true
 			return m, nil
 		}
 		if m.stayPick == nil {
@@ -800,7 +800,7 @@ func kwStr(kw100 int64) string {
 	return s
 }
 
-// lenCards counts the racks a powered subset would run.
+// lenCards counts the cards a powered subset would run.
 func lenCards(powered []int) int {
 	n := 0
 	for _, c := range powered {

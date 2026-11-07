@@ -118,10 +118,10 @@ func TestPoweredSubsetPickerRoundTrip(t *testing.T) {
 		t.Fatalf("p from the plan must open the powered-card editor, got %v", m.mode)
 	}
 	out := m.render()
-	if !strings.Contains(out, "WHICH RACKS RUN TONIGHT") {
+	if !strings.Contains(out, "WHICH CARDS RUN TONIGHT") {
 		t.Errorf("the editor screen is not on display:\n%s", out)
 	}
-	// Nothing owned yet: "+" may not invent racks, so the set stays legal
+	// Nothing owned yet: "+" may not invent cards, so the set stays legal
 	// (empty) and enter takes it back to the plan as a hand-picked zero.
 	m = send(m, "+", "+", "enter")
 	if m.mode != modeStay {

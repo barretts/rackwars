@@ -92,6 +92,85 @@ func TestGarageMeterForcesPartialHost(t *testing.T) {
 	}
 }
 
+// The site's slots are a second hard cap on a hosted night: Ashburn's meter
+// would fit 20 mods (60 c-kW each on a 1200 cap) but only 16 slots stand,
+// so AUTO runs exactly 16 — and the same fleet packs the same way twice, so
+// preview, settlement, and replay cannot disagree.
+func TestAutoHostRackCapBindsBeforeMeter(t *testing.T) {
+	r := fullRun(t, 31, content.Ashburn, 3, 1_000_000)
+	give(r, content.Mod40948, 20)
+	pv := r.PreviewStayMode(StayAuto, nil)
+	if !pv.Valid {
+		t.Fatalf("auto stay refused: %v", pv.Reason)
+	}
+	want := make([]int, len(r.cfg.Products))
+	want[r.Index(content.Mod40948)] = 16
+	if !sameInts(pv.Powered, want) {
+		t.Fatalf("powered = %v, want 16 mods (slots, not the meter, bind)", pv.Powered)
+	}
+	if pv.HostedSlots != 16 || pv.SlotCap != content.MarketOf(content.Ashburn).Slots {
+		t.Fatalf("hosting footprint %d of %d, want 16 of %d",
+			pv.HostedSlots, pv.SlotCap, content.MarketOf(content.Ashburn).Slots)
+	}
+	if again := r.PreviewStayMode(StayAuto, nil); !sameInts(again.Powered, pv.Powered) {
+		t.Fatalf("same fleet packed differently: %v then %v", pv.Powered, again.Powered)
+	}
+}
+
+// The exact boundary of the rack rule: a hosted set may fill the site's
+// slots to the last one; one more card is refused as over-the-slots (the
+// meter here could carry more, so the refusal names the rack rule, not a
+// coincidence), and the refused night burns no day.
+func TestExplicitSubsetRackBoundary(t *testing.T) {
+	r := fullRun(t, 32, content.Ashburn, 3, 1_000_000)
+	give(r, content.Card4090, 20) // 50 c-kW, 1 slot: the meter would fit 24
+	cap := content.MarketOf(content.Ashburn).Slots
+	set := func(n int) []int {
+		p := make([]int, len(r.cfg.Products))
+		p[r.Index(content.Card4090)] = n
+		return p
+	}
+	if pv := r.PreviewStayMode(StayAuto, set(cap)); !pv.Valid || pv.HostedSlots != cap {
+		t.Fatalf("a full house of %d slots was refused: %+v", cap, pv)
+	}
+	pv := r.PreviewStayMode(StayAuto, set(cap+1))
+	if pv.Valid || pv.Reason != ReasonOvercapacity {
+		t.Fatalf("%d-slot set on a %d-slot site: valid=%v reason=%v, want overcapacity",
+			cap+1, cap, pv.Valid, pv.Reason)
+	}
+	if int64((cap+1)*int(content.ProductOf(content.Card4090).PoweredKW)) >=
+		content.MarketOf(content.Ashburn).PowerKW {
+		t.Fatal("fixture broken: this set must fit the meter so only the racks bind")
+	}
+	day := r.State.Day
+	res := resOnly(r.Apply(Action{Kind: ActStay, Powered: set(cap + 1)}))
+	if res.Reason != ReasonOvercapacity || r.State.Day != day {
+		t.Fatalf("commit = %v (day %d), want overcapacity with no day burned", res.Reason, r.State.Day)
+	}
+}
+
+// Buying is fenced by cash and shelf stock only. A fleet larger than the
+// site's hosting capacity is a legal purchase the same morning, and the wall
+// after that is the empty shelf — not the room.
+func TestBuyUnlimitedBySlotsShelfIsTheWall(t *testing.T) {
+	r := fullRun(t, 33, content.WestTexas, 2, 1_000_000_000)
+	p := content.Sled3090
+	lim := r.BuyLimits(p)
+	if lim.LimitBy == ReasonOvercapacity {
+		t.Fatalf("slots still fence a buy: %+v", lim)
+	}
+	if lim.Max != r.StockOf(p) {
+		t.Fatalf("buy max = %+v, want shelf stock %d to be the wall", lim, r.StockOf(p))
+	}
+	if res := resOnly(r.Apply(Action{Kind: ActBuy, Product: p, Qty: lim.Max})); !res.OK {
+		t.Fatalf("buying %d sleds (a %d-slot fleet) refused: %v",
+			lim.Max, r.SlotsUsed()+2*lim.Max, res.Reason)
+	}
+	if res := resOnly(r.Apply(Action{Kind: ActBuy, Product: p, Qty: 1})); res.Reason != ReasonInsufficientStock {
+		t.Fatalf("buying past the shelf gave %v, want insufficient stock", res.Reason)
+	}
+}
+
 func TestElectricityRoundsUpOnly(t *testing.T) {
 	r := fullRun(t, 14, content.Garage, 2, 50_000)
 	give(r, content.Card4090, 1) // 50 c-kW x 24h x 14c = $1.68

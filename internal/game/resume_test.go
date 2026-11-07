@@ -116,7 +116,6 @@ func TestResumeRejectsIllegalStates(t *testing.T) {
 		{"ending on an unfinished day", func(s *State) { s.Over = EndClosed; s.End.Kind = EndClosed; s.Day = 12 }, "closing day"},
 		{"unknown ending kind", func(s *State) { s.Over = EndKind(9) }, "unknown ending"},
 		{"negative statistics", func(s *State) { s.Stats.Commitments = -2 }, "statistics"},
-		{"more hardware than storage", func(s *State) { s.Owned[0] = 999; s.CostBasis[0] = 1 }, "-slot storage"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -130,6 +129,23 @@ func TestResumeRejectsIllegalStates(t *testing.T) {
 				t.Fatalf("refusal for %s does not mention %q: %v", tc.name, tc.want, err)
 			}
 		})
+	}
+}
+
+// The fleet may be larger than any town's racks: slots fence hosting, never
+// owning, so such a save is playable — not corrupt.
+func TestResumeAcceptsFleetLargerThanAnyTown(t *testing.T) {
+	cfg, base := savedRun(t)
+	st := copyState(base)
+	st.Owned[0] = 400
+	st.CostBasis[0] = 1
+	r, err := Resume(cfg, st)
+	if err != nil {
+		t.Fatalf("fleet of %d %s-sized rigs refused as corrupt: %v",
+			st.Owned[0], content.ProductOf(cfg.Products[0]).Name, err)
+	}
+	if want := 400 * content.ProductOf(cfg.Products[0]).SlotsPerUnit; r.SlotsUsed() != want {
+		t.Fatalf("fleet footprint = %d, want %d", r.SlotsUsed(), want)
 	}
 }
 

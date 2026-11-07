@@ -129,30 +129,39 @@ func TestMorningActionsCostNoDay(t *testing.T) {
 	}
 }
 
-// Mechanical check: a 16-slot fleet in Ashburn is blocked from moving to the
-// 8-slot garage before confirmation, not discovered afterwards.
-func TestTravelToSmallerSiteIsBlocked(t *testing.T) {
+// Mechanical check of the owner rule: the fleet is never fenced by a site.
+// A 16-slot fleet moves to the 8-slot garage, freight bills the whole
+// footprint, and it is hosting — not arrival — that the small site bounds.
+func TestOversizedFleetStillTravels(t *testing.T) {
 	r := newTestRun(t, 5)
-	mustApply(t, r, Action{Kind: ActTravel, Market: content.WestTexas}) // 18 slots there
+	mustApply(t, r, Action{Kind: ActTravel, Market: content.WestTexas}) // 24 slots there
 	mustApply(t, r, Action{Kind: ActBorrow, Amount: r.AvailableCredit()})
-	// Fill 16 slots with 3090 sleds (2 slots each).
+	// Fill 16 slots with 3090 sleds (2 slots each) — the whole point is a
+	// fleet that no smaller site could ever host.
 	lim := r.BuyLimits(content.Sled3090)
 	if lim.Max < 8 {
-		t.Fatalf("could not reach 16 occupied slots, max sled buy %d (limits %+v)", lim.Max, lim)
+		t.Fatalf("could not reach 16 fleet slots, max sled buy %d (limits %+v)", lim.Max, lim)
 	}
 	mustApply(t, r, Action{Kind: ActBuy, Product: content.Sled3090, Qty: 8})
 	if r.SlotsUsed() != 16 {
 		t.Fatalf("slots used = %d, want 16", r.SlotsUsed())
 	}
 	pv := r.PreviewTravel(content.Garage)
-	if pv.Valid || pv.Reason != ReasonOvercapacity {
-		t.Fatalf("garage travel preview = %+v, want invalid/overcapacity", pv)
+	if !pv.Valid {
+		t.Fatalf("garage travel preview = %+v, want valid", pv)
 	}
-	if _, res := r.Apply(Action{Kind: ActTravel, Market: content.Garage}); res.OK {
-		t.Fatal("oversized move was applied")
+	if pv.FleetSlots != 16 || pv.HostCap != content.MarketOf(content.Garage).Slots {
+		t.Fatalf("preview footprint = %d fleet, %d host cap; want 16, %d",
+			pv.FleetSlots, pv.HostCap, content.MarketOf(content.Garage).Slots)
 	}
-	if r.State.Market != content.WestTexas || r.State.Day != 2 {
-		t.Fatalf("refused travel changed state: market %s day %d", r.State.Market, r.State.Day)
+	wantFreight := pv.RouteFee + Money(16*content.PerSlotFreight)
+	if pv.Freight != wantFreight {
+		t.Fatalf("freight = %s, want route %s + 16 slots at %d = %s",
+			FormatMoney(pv.Freight), FormatMoney(pv.RouteFee), int(content.PerSlotFreight), FormatMoney(wantFreight))
+	}
+	mustApply(t, r, Action{Kind: ActTravel, Market: content.Garage})
+	if r.State.Market != content.Garage {
+		t.Fatalf("oversized move did not land: market %s", r.State.Market)
 	}
 }
 
@@ -183,7 +192,7 @@ func TestStockDoesNotRefreshDuringActions(t *testing.T) {
 	r := newTestRun(t, 9)
 	r.State.Cash = 1000000 // isolate the stock rule from the cash rule
 	// The H100 shelf in a garage is deliberately thin, so shelf stock binds
-	// before the eight free slots do.
+	// long before the million in cash runs out.
 	p := content.CardH100
 	stock := r.StockOf(p)
 	if stock <= 0 {

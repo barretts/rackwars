@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 
 	"rackwars/internal/content"
 	"rackwars/internal/game"
@@ -64,8 +65,26 @@ func (m Model) render() string {
 	case modeHelp:
 		return strings.Join(m.overlayLines(m.helpBox()), "\n")
 	default:
-		return strings.Join(m.boardLines(b), "\n")
+		return strings.Join(m.fitHeight(m.boardLines(b)), "\n")
 	}
+}
+
+// fitHeight caps the board frame at the screen height. The row set itself has
+// always fit the minimum terminal; only wrapped prose can push it over, and
+// then the top of the board and the key line are what a player still needs,
+// so they stay and the lost middle says so plainly. Frames that fit are
+// returned untouched: short frames are today's normal, not an error.
+func (m Model) fitHeight(lines []string) []string {
+	if len(lines) <= m.height {
+		return lines
+	}
+	lost := len(lines) - (m.height - 2) - 1
+	trimmed := make([]string, 0, m.height)
+	trimmed = append(trimmed, lines[:m.height-2]...)
+	trimmed = append(trimmed, m.chrome.Muted(m.chrome.Bullet()+" "+itoa(lost)+
+		" wrapped line"+plural(lost)+" hidden by the window height; resize to read them"),
+		lines[len(lines)-1])
+	return trimmed
 }
 
 // endLines fills the screen with the ending rather than overlaying a box, so the
@@ -179,41 +198,40 @@ func (m Model) mainLines(b Board, width int) []string {
 			m.chrome.Plain("  ")+m.chrome.Bad(game.FormatMoney(b.Debt)+" debt")+
 			m.chrome.Plain("  net ")+m.moneyColor(b.NetWorth)+
 			m.chrome.Plain("  heat "+itoa(b.Heat)+
-				"  slots "+itoa(b.SlotsUsed)+"/"+itoa(b.SlotsTotal)), width),
-		m.chrome.fitPad(m.chrome.Bold(b.Headline), width),
+				"  fleet "+itoa(b.SlotsUsed)+"  racks "+itoa(b.SlotsTotal)), width),
 	}
+	lines = append(lines, m.chrome.wrapPad(m.chrome.Bold(b.Headline), width)...)
 	if b.Warning != "" {
-		lines = append(lines, m.chrome.fitPad(m.chrome.Warn(m.chrome.Bullet()+" "+b.Warning), width))
+		lines = append(lines, m.chrome.wrapPad(m.chrome.Warn(m.chrome.Bullet()+" "+b.Warning), width)...)
 	} else {
 		lines = append(lines, m.chrome.Muted(m.chrome.Rule(width)))
 	}
 	lines = append(lines, m.chrome.Rule(width))
 
-	lines = append(lines, m.chrome.Head(fmt.Sprintf("%-2s%12s %10s %10s %6s %6s %5s",
-		"", "PRODUCT", "BUY ASK", "SELL BID", "STOCK", "OWNED", "SLOTS")))
+	lines = append(lines, m.chrome.Head(fmt.Sprintf("%-2s%12s %10s %10s %6s %6s %5s %6s %8s %5s",
+		"", "PRODUCT", "BUY ASK", "SELL BID", "STOCK", "OWNED", "SLOTS", "KW", "HOST/NGT", "CLASS")))
 	for i, row := range b.Rows {
 		lines = append(lines, m.productLine(width, i, row))
 	}
 
 	lines = append(lines, m.chrome.Rule(width))
-	lines = append(lines, m.chrome.fitPad(m.chrome.Muted("Hosting: "+b.Hosting)+
-		m.chrome.Plain("  overnight "+b.StayCost+" interest  travel "+b.TravelCost), width))
+	lines = append(lines, m.chrome.wrapPad(m.chrome.Muted("Hosting: "+b.Hosting)+
+		m.chrome.Plain("  overnight "+b.StayCost+" interest  travel "+b.TravelCost), width)...)
 	if b.Power != "" {
-		lines = append(lines, m.chrome.fitPad(m.chrome.Muted("Meter:   "+b.Power), width))
+		lines = append(lines, m.chrome.wrapPad(m.chrome.Muted("Meter:   "+b.Power), width)...)
 	}
 	if b.Curtail != "" {
-		lines = append(lines, m.chrome.fitPad(m.chrome.Good(m.chrome.Bullet()+" "+b.Curtail), width))
+		lines = append(lines, m.chrome.wrapPad(m.chrome.Good(m.chrome.Bullet()+" "+b.Curtail), width)...)
 	}
 	if b.Alloc != "" {
-		lines = append(lines, m.chrome.fitPad(m.chrome.Warn(m.chrome.Bullet()+" "+b.Alloc), width))
+		lines = append(lines, m.chrome.wrapPad(m.chrome.Warn(m.chrome.Bullet()+" "+b.Alloc), width)...)
 	}
-	lines = append(lines, m.chrome.fitPad(m.statusLine(b), width))
+	lines = append(lines, m.chrome.wrapPad(m.statusLine(b), width)...)
 	keys := "[b]uy  [s]ell  [l]ender  [t]ravel  [e]/[enter] face morning  [?]help  [q]uit"
 	if b.Full {
 		keys = "[b]uy  [s]ell  [l]ender  [a]llocation  [t]ravel  [e]/[enter] plan the night  [?]help  [q]uit"
 	}
-	lines = append(lines, m.chrome.fitPad(m.chrome.Muted(keys), width))
-	return lines
+	return append(lines, m.chrome.wrapPad(m.chrome.Muted(keys), width)...)
 }
 
 // statusLine is the board's live read of the selected card: its quotes, what the
@@ -236,14 +254,12 @@ func (m Model) statusLine(b Board) string {
 	}
 	bound := "cash"
 	switch limits.LimitBy {
-	case game.ReasonOvercapacity:
-		bound = "slots"
 	case game.ReasonInsufficientStock:
 		bound = "shop stock"
 	case game.ReasonOK:
 		bound = "what you hold"
 	}
-	return m.chrome.Muted(fmt.Sprintf("%s: buy %s  sell %s  stock %d, you hold %d (%d slot%s)  most %s: %d (%s)",
+	return m.chrome.Muted(fmt.Sprintf("%s: buy %s  sell %s  stock %d, you hold %d (%d slot%s each)  most %s: %d (%s)",
 		row.Name, game.FormatMoney(row.Ask), game.FormatMoney(row.Bid), row.Stock, row.Owned,
 		row.Slots, plural(row.Slots), verbOf(m.qtyAction), limits.Max, bound))
 }
@@ -257,10 +273,11 @@ func verbOf(a tradeAction) string {
 
 func (m Model) productLine(width, i int, row ProductRow) string {
 	selected := i == m.sel
-	line := fmt.Sprintf("%-2s%12s %10s %10s %6d %6d %5d",
+	line := fmt.Sprintf("%-2s%12s %10s %10s %6d %6d %5d %6s %8s %5s",
 		m.chrome.Marker(selected), row.Name,
 		game.FormatMoney(row.Ask), game.FormatMoney(row.Bid),
-		row.Stock, row.Owned, row.Slots)
+		row.Stock, row.Owned, row.Slots,
+		kwStr(row.KW100), game.FormatMoney(row.Host), row.Class)
 	if selected {
 		line = m.chrome.Sel(m.chrome.fitPad(line, width))
 	} else {
@@ -273,7 +290,7 @@ func (m Model) sidePanel(lines []string, width int) []string {
 	out := make([]string, 0, len(lines)+2)
 	out = append(out, m.chrome.Head(m.chrome.fitPad("DETAIL", width)))
 	for _, l := range lines {
-		out = append(out, m.chrome.fitPad(m.chrome.Muted(l), width))
+		out = append(out, m.chrome.wrapPad(m.chrome.Muted(l), width)...)
 	}
 	return out
 }
@@ -281,7 +298,7 @@ func (m Model) sidePanel(lines []string, width int) []string {
 // overlayLines draws box on top of the current board, centered, sized to the
 // widest box line. Base rows outside the box stay visible.
 func (m Model) overlayLines(box []string) []string {
-	base := m.mainLines(m.snapshot(), m.width)
+	base := m.fitHeight(m.mainLines(m.snapshot(), m.width))
 	if len(base) < m.height {
 		for len(base) < m.height {
 			base = append(base, "")
@@ -359,6 +376,139 @@ func (c Chrome) fit(s string, w int) string {
 		tail = "~"
 	}
 	return ansi.Truncate(s, max(w-len(tail), 0), tail)
+}
+
+// wrapFlow breaks one styled line into lines of at most w cells, breaking
+// words at spaces, so a headline or a status line that outgrows the terminal
+// is read to the end instead of losing its punchline to an ellipsis. Escape
+// sequences ride with the text that follows them and are not counted, which
+// keeps the word logic correct for anything the chrome styles can produce;
+// a word wider than the line is cut at the cell limit, which still lands on
+// a printable boundary because the cut is measured in cells, not bytes.
+func (c Chrome) wrapFlow(s string, w int) []string {
+	if w < 1 {
+		w = 1
+	}
+	if ansi.StringWidth(s) <= w {
+		return []string{s}
+	}
+	// Tokenize into whole words plus escape stubs. A space ends a word; runs
+	// of spaces collapse, because prose re-wrapping owns the gaps now.
+	var words []struct {
+		text  string
+		cells int
+	}
+	var buf strings.Builder
+	cells := 0
+	inEsc := false
+	flush := func() {
+		if buf.Len() > 0 {
+			words = append(words, struct {
+				text  string
+				cells int
+			}{buf.String(), cells})
+			buf.Reset()
+			cells = 0
+		}
+	}
+	for _, r := range s {
+		if inEsc {
+			buf.WriteRune(r)
+			if (r >= '0' && r <= '9') || r == ';' || r == '?' || r == '[' {
+				continue
+			}
+			inEsc = false
+			continue
+		}
+		if r == 0x1b {
+			buf.WriteRune(r)
+			inEsc = true
+			continue
+		}
+		if r == ' ' {
+			flush()
+			continue
+		}
+		buf.WriteRune(r)
+		cells += runewidth.RuneWidth(r)
+	}
+	flush()
+
+	var (
+		out   []string
+		line  strings.Builder
+		lineW int
+	)
+	put := func(text string, cw int) {
+		for cw > w {
+			// A word wider than the line: fill the line, then keep cutting.
+			if lineW > 0 {
+				out = append(out, line.String())
+				line.Reset()
+				lineW = 0
+			}
+			// Cut the over-long word cell by cell. Rune-wise
+			// re-measuring stops on a cell boundary with its escapes; a
+			// single rune wider than the whole line is kept whole
+			// (sub-floor terminals are the game's own problem).
+			rs := []rune(text)
+			n, taken := 0, 1
+			for i, r := range rs {
+				nw := n + runewidth.RuneWidth(r)
+				if nw > w {
+					if i > 0 {
+						taken = i
+					}
+					break
+				}
+				n = nw
+			}
+			if taken == len(rs) {
+				taken = max(taken-1, 1) // safety: always consume progress
+			}
+			head := string(rs[:taken])
+			hw := 0
+			for _, r := range rs[:taken] {
+				hw += runewidth.RuneWidth(r)
+			}
+			text, cw = string(rs[taken:]), cw-hw
+			out = append(out, head)
+		}
+		if lineW == 0 {
+			line.WriteString(text)
+			lineW = cw
+			return
+		}
+		if lineW+1+cw <= w {
+			line.WriteString(" ")
+			line.WriteString(text)
+			lineW += 1 + cw
+			return
+		}
+		out = append(out, line.String())
+		line.Reset()
+		line.WriteString(text)
+		lineW = cw
+	}
+	for _, word := range words {
+		put(word.text, word.cells)
+	}
+	if line.Len() > 0 || len(out) == 0 {
+		out = append(out, line.String())
+	}
+	return out
+}
+
+// wrapPad wraps prose like wrapFlow and pads each resulting line to exactly w
+// cells, the prose sibling of fitPad.
+func (c Chrome) wrapPad(s string, w int) []string {
+	lines := c.wrapFlow(s, w)
+	for i, l := range lines {
+		if pad := w - ansi.StringWidth(l); pad > 0 {
+			lines[i] = l + strings.Repeat(" ", pad)
+		}
+	}
+	return lines
 }
 
 func (c Chrome) fitPad(s string, w int) string {

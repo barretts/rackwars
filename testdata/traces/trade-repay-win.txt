@@ -1,39 +1,41 @@
-seed 1 day 30 westtexas cash $64,152 debt $0
+seed 1 day 30 westtexas cash $131,375 debt $0
 cast 3090sled,4090,h100 markets garage,ashburn,westtexas rules prototype
 d2  ashburn    travel -> ashburn      cash $29,750 debt $22,000 net $7,750 slots 0 interest $2,000 freight $250
 d3  westtexas  travel -> westtexas    cash $29,500 debt $24,200 net $5,300 slots 0 interest $2,200 freight $250
-d3  westtexas  buy 3090sled x12       cash $25,576 debt $24,200 net $4,580 slots 24 cost $3,924
-d3  westtexas  repay $24,200          cash $1,376 debt $0 net $4,580 slots 24 cost $24,200
-d4  westtexas  stay                   cash $1,376 debt $0 net $5,096 slots 24
-d5  westtexas  stay                   cash $1,376 debt $0 net $5,096 slots 24
-d6  westtexas  stay                   cash $1,376 debt $0 net $18,332 slots 24
-d7  westtexas  stay                   cash $1,376 debt $0 net $30,152 slots 24
-d7  westtexas  sell 3090sled x12      cash $30,152 debt $0 net $30,152 slots 0 gross $28,776
-d8  westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d9  westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d10 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d11 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d12 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d13 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d14 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d15 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d16 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d17 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d18 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d19 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d20 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d21 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d22 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d23 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d24 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d25 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d26 westtexas  stay                   cash $30,152 debt $0 net $30,152 slots 0
-d26 westtexas  buy h100 x1            cash $16,688 debt $0 net $27,704 slots 1 cost $13,464
-d27 westtexas  stay                   cash $16,688 debt $0 net $22,808 slots 1
-d27 westtexas  buy h100 x2            cash $1,728 debt $0 net $20,088 slots 3 cost $14,960
-d28 westtexas  stay                   cash $1,728 debt $0 net $44,322 slots 3
-d29 westtexas  stay                   cash $1,728 debt $0 net $64,152 slots 3
-d29 westtexas  sell h100 x3           cash $64,152 debt $0 net $64,152 slots 0 gross $62,424
-d30 westtexas  stay                   cash $64,152 debt $0 net $64,152 slots 0
-d30 westtexas  stay                   cash $64,152 debt $0 net $64,152 slots 0
-over: closed cash-out $64,152 rank Still independent
+d3  westtexas  buy 3090sled x24       cash $21,652 debt $24,200 net $3,860 slots 48 cost $7,848
+d3  westtexas  repay $20,652          cash $1,000 debt $3,548 net $3,860 slots 48 cost $20,652
+d4  westtexas  stay                   cash $1,000 debt $3,903 net $4,537 slots 48 interest $355
+d4  westtexas  buy 3090sled x2        cash $240 debt $3,903 net $4,397 slots 52 cost $760
+d5  westtexas  stay                   cash $240 debt $4,294 net $4,006 slots 52 interest $391
+d6  westtexas  stay                   cash $240 debt $4,724 net $32,254 slots 52 interest $430
+d7  westtexas  stay                   cash $240 debt $5,197 net $57,391 slots 52 interest $473
+d7  westtexas  sell 3090sled x26      cash $62,588 debt $5,197 net $57,391 slots 0 gross $62,348
+d7  westtexas  repay $5,197           cash $57,391 debt $0 net $57,391 slots 0 cost $5,197
+d8  westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d9  westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d10 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d11 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d12 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d13 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d14 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d15 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d16 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d17 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d18 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d19 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d20 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d21 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d22 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d23 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d24 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d25 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d26 westtexas  stay                   cash $57,391 debt $0 net $57,391 slots 0
+d26 westtexas  buy h100 x1            cash $43,927 debt $0 net $54,943 slots 1 cost $13,464
+d27 westtexas  stay                   cash $43,927 debt $0 net $50,047 slots 1
+d27 westtexas  buy h100 x5            cash $6,527 debt $0 net $43,247 slots 6 cost $37,400
+d28 westtexas  stay                   cash $6,527 debt $0 net $91,715 slots 6
+d29 westtexas  stay                   cash $6,527 debt $0 net $131,375 slots 6
+d29 westtexas  sell h100 x6           cash $131,375 debt $0 net $131,375 slots 0 gross $124,848
+d30 westtexas  stay                   cash $131,375 debt $0 net $131,375 slots 0
+d30 westtexas  stay                   cash $131,375 debt $0 net $131,375 slots 0
+over: closed cash-out $131,375 rank Garage graduate

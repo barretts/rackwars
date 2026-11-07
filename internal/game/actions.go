@@ -39,7 +39,7 @@ func (re Reason) String() string {
 	case ReasonUnknownProduct:
 		return "unknown product"
 	case ReasonOvercapacity:
-		return "over capacity"
+		return "over the site's slots"
 	case ReasonInsufficientStock:
 		return "insufficient stock"
 	case ReasonInsufficientCash:
@@ -75,20 +75,17 @@ type QuantityLimits struct {
 }
 
 // BuyLimits returns the largest purchasable quantity of a card here: the
-// intersection of shop stock, free slots, and cash.
+// intersection of shop stock and cash. Rack slots do not fence buying; slots
+// decide how much of the fleet a site can HOST at night, not how many cards
+// the empty coat lets you carry.
 func (r *Run) BuyLimits(p content.ProductID) QuantityLimits {
 	pi := r.Index(p)
 	if pi < 0 || r.State.Over != EndOpen {
 		return QuantityLimits{Max: 0, LimitBy: ReasonRunOver}
 	}
-	perUnit := content.ProductOf(p).SlotsPerUnit
 	ask := r.QuoteHere(p).Ask
 
 	fromStock := r.State.Stock[pi]
-	fromSlots := 0
-	if perUnit > 0 {
-		fromSlots = r.SlotsAvailable() / perUnit
-	}
 	fromCash := 0
 	if ask > 0 {
 		fromCash = int(r.State.Cash / ask)
@@ -96,15 +93,12 @@ func (r *Run) BuyLimits(p content.ProductID) QuantityLimits {
 
 	max := fromStock
 	blocked := ReasonInsufficientStock
-	if fromSlots < max {
-		max, blocked = fromSlots, ReasonOvercapacity
-	}
 	if fromCash < max {
 		max, blocked = fromCash, ReasonInsufficientCash
 	}
 	if max < 0 {
 		max = 0
-		blocked = ReasonOvercapacity
+		blocked = ReasonInsufficientStock
 	}
 	return QuantityLimits{Max: max, LimitBy: blocked}
 }
@@ -122,7 +116,9 @@ func (r *Run) SellLimits(p content.ProductID) QuantityLimits {
 	return QuantityLimits{Max: r.State.Owned[pi], LimitBy: ReasonOK}
 }
 
-// PreviewBuy is the confirmation screen: cost, cash and capacity afterward.
+// PreviewBuy is the confirmation screen: cost, cash and the fleet's slot
+// footprint afterward. Slots are shown because freight bills the footprint,
+// not because buying can run out of them.
 type PreviewBuy struct {
 	Product    content.ProductID `json:"product"`
 	Qty        int               `json:"qty"`
@@ -132,13 +128,11 @@ type PreviewBuy struct {
 	CashAfter  Money             `json:"cashAfter"`
 	SlotsUsed  int               `json:"slotsUsed"`
 	SlotsAfter int               `json:"slotsAfter"`
-	SlotsTotal int               `json:"slotsTotal"`
 	StockLeft  int               `json:"stockLeft"`
 	HeatAfter  int               `json:"heatAfter"`
 	Valid      bool              `json:"valid"`
 	Reason     Reason            `json:"reason"`
 	ShortBy    Money             `json:"shortBy"`
-	SlotsShort int               `json:"slotsShort"`
 	StockShort int               `json:"stockShort"`
 }
 
@@ -161,7 +155,6 @@ func (r *Run) PreviewBuy(p content.ProductID, qty int) PreviewBuy {
 	pv.Cost = q.Ask * Money(qty)
 	pv.CashAfter = r.State.Cash - pv.Cost
 	pv.SlotsUsed = r.SlotsUsed()
-	pv.SlotsTotal = content.MarketOf(r.State.Market).Slots
 	pv.SlotsAfter = pv.SlotsUsed + qty*def.SlotsPerUnit
 	pv.StockLeft = r.State.Stock[pi] - qty
 	pv.HeatAfter = r.State.Heat
@@ -173,18 +166,13 @@ func (r *Run) PreviewBuy(p content.ProductID, qty int) PreviewBuy {
 	if r.cfg.Rules.Heat && p == content.Mod40948 {
 		pv.HeatAfter = clampInt(pv.HeatAfter+10*qty, 0, 100)
 	}
-	// Report every constraint that binds, so the message can name the money,
-	// the slots, or the stock as appropriate rather than guessing. Cash is
-	// checked first: an unaffordable purchase is the most common refusal and
-	// the player needs the exact shortfall.
+	// Report every constraint that binds, so the message can name the money
+	// or the stock as appropriate rather than guessing. Cash is checked
+	// first: an unaffordable purchase is the most common refusal and the
+	// player needs the exact shortfall.
 	if pv.Cost > r.State.Cash {
 		pv.Reason = ReasonInsufficientCash
 		pv.ShortBy = pv.Cost - r.State.Cash
-		return pv
-	}
-	if pv.SlotsAfter > pv.SlotsTotal {
-		pv.Reason = ReasonOvercapacity
-		pv.SlotsShort = pv.SlotsAfter - pv.SlotsTotal
 		return pv
 	}
 	if qty > r.State.Stock[pi] {
@@ -498,7 +486,6 @@ type Result struct {
 	PendingEncounter bool `json:"pendingEncounter,omitempty"`
 	// Short fields let the TUI name the exact gap in the player's own numbers.
 	ShortCash   Money `json:"shortCash,omitempty"`
-	ShortSlots  int   `json:"shortSlots,omitempty"`
 	ShortStock  int   `json:"shortStock,omitempty"`
 	MaxAccepted int   `json:"maxAccepted,omitempty"`
 	MaxAmount   Money `json:"maxAmount,omitempty"`
@@ -532,8 +519,9 @@ func (r *Run) Apply(a Action) (Receipt, Result) {
 }
 
 // applyAllocation takes Andy's constrained supply: whole dollars at the
-// offered share of the local ask, cash-only like every buy, slots and all,
-// and once per run no matter how good tomorrow looks. It costs no day.
+// offered share of the local ask, cash-only like every buy, and once per run
+// no matter how good tomorrow looks. Slots do not fence it; hosting does.
+// It costs no day.
 func (r *Run) applyAllocation(a Action) (Receipt, Result) {
 	off := r.PreviewAllocation()
 	if !off.Eligible {
@@ -560,11 +548,7 @@ func (r *Run) applyAllocation(a Action) (Receipt, Result) {
 		return Receipt{}, Result{Reason: ReasonInsufficientCash, ShortCash: cost - r.State.Cash,
 			MaxAccepted: int(r.State.Cash / maxMoney(off.UnitPrice, 1))}
 	}
-	def := content.ProductOf(off.Product)
 	pi := r.Index(off.Product)
-	if qty*def.SlotsPerUnit > r.SlotsAvailable() {
-		return Receipt{}, Result{Reason: ReasonOvercapacity, ShortSlots: qty*def.SlotsPerUnit - r.SlotsAvailable()}
-	}
 	r.State.Cash -= cost
 	r.State.Owned[pi] += qty
 	r.State.CostBasis[pi] += cost
@@ -582,7 +566,7 @@ func (r *Run) applyAllocation(a Action) (Receipt, Result) {
 func (r *Run) applyBuy(a Action) (Receipt, Result) {
 	pv := r.PreviewBuy(a.Product, a.Qty)
 	if !pv.Valid {
-		res := Result{Reason: pv.Reason, ShortCash: pv.ShortBy, ShortSlots: pv.SlotsShort, ShortStock: pv.StockShort}
+		res := Result{Reason: pv.Reason, ShortCash: pv.ShortBy, ShortStock: pv.StockShort}
 		res.MaxAccepted = r.BuyLimits(a.Product).Max
 		return Receipt{}, res
 	}

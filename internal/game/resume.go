@@ -113,18 +113,10 @@ func Resume(cfg Config, st State) (*Run, error) {
 			return nil, fmt.Errorf("pending encounter names %q, which the saved cast does not contain", e.Named)
 		}
 	}
-	// Capacity is a rule of the active lease, and leases are switched off in
-	// every ruleset that has a save format so far; while leases are off the
-	// town's own storage is the limit, so a state that overflows it cannot have
-	// come from this engine.
-	if !cfg.Rules.Leases {
-		limit := content.MarketOf(st.Market).Slots
-		r := &Run{cfg: cfg, State: st}
-		if used := r.SlotsUsed(); used > limit {
-			return nil, fmt.Errorf("%s holds %d slots of hardware in %d-slot storage",
-				st.Market, used, limit)
-		}
-	}
+	// (Slot capacity is deliberately absent from this legality list: a fleet
+	// of any size is a legal position — slots fence which cards a site can
+	// host at once, never what a player may own, so a save with a fleet
+	// larger than any town is playable, not corrupt.)
 	switch st.Over {
 	case EndOpen:
 		if st.End.Kind != EndOpen {

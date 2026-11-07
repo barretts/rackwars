@@ -206,7 +206,13 @@ func TestOversizedQuantityIsRefusedWithTheExactGap(t *testing.T) {
 	limits := m.run.BuyLimits(p)
 	before := facts(m)
 
-	got := send(m, "b", itoa(limits.Max+1), "enter")
+	// The engine accepts a number limited only by stock and cash, which can
+	// be more than one digit; terminals deliver digits one key at a time.
+	var keys []string
+	keys = append(keys, "b")
+	keys = append(keys, strings.Split(itoa(limits.Max+1), "")...)
+	keys = append(keys, "enter")
+	got := send(m, keys...)
 	if got.mode != modeQty {
 		t.Errorf("a refused purchase closed the box (mode %v)", got.mode)
 	}
@@ -222,12 +228,8 @@ func TestOversizedQuantityIsRefusedWithTheExactGap(t *testing.T) {
 		if !strings.Contains(got.status, "short "+game.FormatMoney(want.ShortBy)) {
 			t.Errorf("refusal did not name the missing money (%s): %q", game.FormatMoney(want.ShortBy), got.status)
 		}
-	case game.ReasonOvercapacity:
-		if !strings.Contains(got.status, itoa(want.SlotsShort)+" slots short") {
-			t.Errorf("refusal did not name the missing slots (%d): %q", want.SlotsShort, got.status)
-		}
 	case game.ReasonInsufficientStock:
-		if !strings.Contains(got.status, itoa(want.StockShort)+" short of stock") {
+		if !strings.Contains(got.status, itoa(want.StockShort)+" short") {
 			t.Errorf("refusal did not name the missing stock (%d): %q", want.StockShort, got.status)
 		}
 	default:

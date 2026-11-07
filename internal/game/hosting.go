@@ -96,68 +96,114 @@ func poweredKW100(products []content.ProductID, powered []int) int64 {
 	return kw
 }
 
-// bestPowered picks the most valuable subset of the fleet that fits the site's
-// meter: an exact knapsack over the expanded fleet, not a greedy hunch. Values
-// are per-night hosting gross; weight is hundredths of a kilowatt. Units are
-// expanded in product order and ties prefer the earlier decision (the DP keeps
-// the previous row on equality), so the same fleet always packs the same way —
-// preview, settlement, and a replay months later never disagree about which
-// subset "auto" meant on a day long past.
+// hostSlots is the rack footprint of a powered subset: the slots the site
+// must have standing to host it. Unlike the fleet, which travels whole and
+// bills freight by footprint, only the hosted subset occupies a site.
+func hostSlots(products []content.ProductID, powered []int) int {
+	n := 0
+	for pi := range products {
+		if powered[pi] > 0 {
+			n += powered[pi] * content.ProductOf(products[pi]).SlotsPerUnit
+		}
+	}
+	return n
+}
+
+// bestPowered picks the most valuable subset of the fleet that fits the site
+// for a hosted night: both the meter (centi-kW) and the site's rack slots.
+// It is an exact knapsack over product groups, not a greedy hunch. Buying is
+// unlimited, so the loop is bounded: units of one product are
+// interchangeable, and a group never needs more items than the smaller of
+// the two capacities can physically hold. A unit's value is its per-night
+// hosting gross — identical across every cell of one product, so a product
+// with zero gross earns no rack anywhere and per-cell pricing degenerates to
+// the global values this used to carry.
+//
+// Units are expanded in product order and ties prefer the earlier product
+// (the DP keeps the previous row on equality), so the same fleet always
+// packs the same way — preview, settlement, and a replay months later never
+// disagree about which subset "auto" meant on a day long past.
 func (r *Run) bestPowered(day int, m content.MarketID) []int {
 	np := len(r.cfg.Products)
 	out := make([]int, np)
 	if !r.hostEligible(m) {
 		return out
 	}
-	siteCap := int(content.MarketOf(m).PowerKW)
-	if siteCap <= 0 {
+	mk := content.MarketOf(m)
+	kwCap, slotCap := int(mk.PowerKW), mk.Slots
+	if kwCap <= 0 || slotCap <= 0 {
 		return out
 	}
-	// Expand the fleet into unit items: value = one night's gross, weight =
-	// centi-kW. Units that cannot fit alone are skipped, as are idle cards
-	// with no metered load.
+	// Unit items: value = one night's gross, weights = centi-kW and rack
+	// slots. Cards that cannot fit alone in either dimension, idle cards,
+	// and units with no gross are skipped.
 	type unitItem struct {
-		pi int
-		v  int64
-		w  int
+		pi, kw, sl int
+		v          int64
 	}
 	var items []unitItem
 	for pi, p := range r.cfg.Products {
 		def := content.ProductOf(p)
-		if def.PoweredKW <= 0 || def.PoweredKW > int64(siteCap) {
+		if def.PoweredKW <= 0 || def.SlotsPerUnit <= 0 || r.State.Owned[pi] <= 0 {
+			continue
+		}
+		if def.PoweredKW > int64(kwCap) || def.SlotsPerUnit > slotCap {
 			continue
 		}
 		v := int64(hostUnitGross(p, r.hostingPct(day, m, p)))
-		if v <= 0 || r.State.Owned[pi] <= 0 {
+		if v <= 0 {
 			continue
 		}
-		for u := 0; u < r.State.Owned[pi]; u++ {
-			items = append(items, unitItem{pi: pi, v: v, w: int(def.PoweredKW)})
+		count := r.State.Owned[pi]
+		if fit := kwCap / int(def.PoweredKW); count > fit {
+			count = fit
+		}
+		if fit := slotCap / def.SlotsPerUnit; count > fit {
+			count = fit
+		}
+		for u := 0; u < count; u++ {
+			items = append(items, unitItem{pi: pi, kw: int(def.PoweredKW), sl: def.SlotsPerUnit, v: v})
 		}
 	}
 	if len(items) == 0 {
 		return out
 	}
-	// rows[i] is the value vector after the first i items.
+	cols := slotCap + 1
+	cells := (kwCap + 1) * cols
+	// rows[i] is the value grid after the first i units; take[i] marks the
+	// cells whose value improved by taking unit i, which is exactly what the
+	// backward walk below needs, at one byte a cell instead of a whole
+	// extra int64 grid. Descending loops in both dimensions keep every unit
+	// 0/1: a unit builds only on states that do not already hold it.
 	rows := make([][]int64, len(items)+1)
 	for i := range rows {
-		rows[i] = make([]int64, siteCap+1)
+		rows[i] = make([]int64, cells)
 	}
+	take := make([][]bool, len(items))
 	for i, it := range items {
 		prev, cur := rows[i], rows[i+1]
 		copy(cur, prev)
-		for c := it.w; c <= siteCap; c++ {
-			if cand := prev[c-it.w] + it.v; cand > cur[c] {
-				cur[c] = cand
+		th := make([]bool, cells)
+		for w := kwCap; w >= it.kw; w-- {
+			base := w * cols
+			for s := slotCap; s >= it.sl; s-- {
+				if cand := prev[(w-it.kw)*cols+s-it.sl] + it.v; cand > cur[base+s] {
+					cur[base+s] = cand
+					th[base+s] = true
+				}
 			}
 		}
+		take[i] = th
 	}
-	// Recover: walk the table backward; a changed cell means item i is taken.
-	c := siteCap
+	// Recover: walk from the full site backward; a marked cell means unit i
+	// is in the night's set, and its weights leave the remaining capacity.
+	w, s := kwCap, slotCap
 	for i := len(items); i > 0; i-- {
-		if rows[i][c] != rows[i-1][c] {
-			out[items[i-1].pi]++
-			c -= items[i-1].w
+		it := items[i-1]
+		if take[i-1][w*cols+s] {
+			out[it.pi]++
+			w -= it.kw
+			s -= it.sl
 		}
 	}
 	return out

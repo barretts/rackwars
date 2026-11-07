@@ -41,8 +41,8 @@ func (m Model) qtyBox(b Board) []string {
 		m.chrome.Muted(m.chrome.Rule(46)),
 		fmt.Sprintf("ask %-10s bid %-10s stock %d  you hold %d",
 			game.FormatMoney(row.Ask), game.FormatMoney(row.Bid), row.Stock, row.Owned),
-		fmt.Sprintf("free slots %d of %d   %s is %s each",
-			b.SlotsTotal-b.SlotsUsed, b.SlotsTotal, row.Name, game.FormatMoney(price)),
+		fmt.Sprintf("%s is %s each  %d slot%s  fleet %d",
+			row.Name, game.FormatMoney(price), row.Slots, plural(row.Slots), b.SlotsUsed),
 		"",
 		"quantity: " + m.qtyDraft + "_",
 	}
@@ -84,9 +84,6 @@ func buyPreview(c Chrome, pv game.PreviewBuy) []string {
 		case game.ReasonInsufficientCash:
 			return []string{c.Bad(fmt.Sprintf("cost %s  short %s", game.FormatMoney(pv.Cost),
 				game.FormatMoney(pv.ShortBy)))}
-		case game.ReasonOvercapacity:
-			return []string{c.Bad(fmt.Sprintf("cost %s  %d slots short", game.FormatMoney(pv.Cost),
-				pv.SlotsShort))}
 		case game.ReasonInsufficientStock:
 			return []string{c.Bad(fmt.Sprintf("cost %s  %d short of stock", game.FormatMoney(pv.Cost),
 				pv.StockShort))}
@@ -94,9 +91,8 @@ func buyPreview(c Chrome, pv game.PreviewBuy) []string {
 			return []string{c.Bad("refused: " + pv.Reason.String())}
 		}
 	}
-	return []string{fmt.Sprintf("cost %s   cash after %s   slots %d/%d",
-		game.FormatMoney(pv.Cost), game.FormatMoney(pv.CashAfter),
-		pv.SlotsAfter, pv.SlotsTotal)}
+	return []string{fmt.Sprintf("cost %s   cash after %s   fleet %d slots",
+		game.FormatMoney(pv.Cost), game.FormatMoney(pv.CashAfter), pv.SlotsAfter)}
 }
 
 func sellPreview(c Chrome, pv game.PreviewSell) []string {
@@ -184,8 +180,8 @@ func (m Model) travelBox(b Board) []string {
 		pv := m.run.PreviewTravel(id)
 		dest := content.MarketOf(id)
 		marker := m.chrome.Marker(i == m.travelSel)
-		lines = append(lines, marker+fmt.Sprintf("[%d] %-12s freight %-9s  %d slots  lease %s/day",
-			i+1, dest.Name, "-"+game.FormatMoney(pv.Freight), pv.SlotsTotal,
+		lines = append(lines, marker+fmt.Sprintf("[%d] %-12s freight %-9s  hosts %d  lease %s/day",
+			i+1, dest.Name, "-"+game.FormatMoney(pv.Freight), pv.HostCap,
 			"-"+game.FormatMoney(pv.NextLease)))
 	}
 	dest := m.destMarket()
@@ -196,13 +192,10 @@ func (m Model) travelBox(b Board) []string {
 	lines = append(lines,
 		m.chrome.Muted(m.chrome.Rule(46)),
 		"to "+content.MarketOf(dest).Name+": cash "+game.FormatMoney(pv.CashAfter)+
-			"   debt after interest "+game.FormatMoney(pv.DebtAfter)+
-			"   your "+itoa(pv.OccupiedSlots)+" slots into "+itoa(pv.SlotsTotal),
+			"   debt after interest "+game.FormatMoney(pv.DebtAfter),
+		"fleet "+itoa(pv.FleetSlots)+" slots ride along; "+
+			itoa(pv.HostCap)+" host racks there.",
 	)
-	if pv.OccupiedSlots > pv.SlotsTotal {
-		lines = append(lines, m.chrome.Bad("Your load does not fit there: "+
-			itoa(pv.OccupiedSlots-pv.SlotsTotal)+" slots over."))
-	}
 	lines = append(lines, m.knownQuoteLines(dest)...)
 	lines = append(lines, m.chrome.Warn(m.chrome.Bullet()+" Travelling costs the day: this closes day "+
 		itoa(b.Day)+", and prices elsewhere are only what they were when you saw them."))
@@ -224,15 +217,16 @@ func (m Model) stayBox(b Board) []string {
 		m.chrome.Title("THE NIGHT AHEAD AT " + b.Town),
 		m.chrome.Muted(m.chrome.Rule(46)),
 		"lease " + game.FormatMoney(pvAuto.Lease) + "/day   meter " +
-			kwStr(pvAuto.PowerCap) + " kW   heat " + itoa(b.Heat) + "°",
+			kwStr(pvAuto.PowerCap) + " kW   slots " + itoa(b.SlotsTotal) +
+			"   heat " + itoa(b.Heat) + "°",
 		"",
-		m.modeKey("1", "AUTO — power the best set the meter can carry",
+		m.modeKey("1", "AUTO — power the best set the meter and slots can carry",
 			m.stayMode == game.StayAuto) + "   [p] pick the cards by hand",
 	}
 	shown := pvAuto
 	if m.stayMode == game.StayAuto && len(m.stayPowered) > 0 {
 		shown = m.run.PreviewStayMode(game.StayAuto, m.stayPowered)
-		lines[4] = m.modeKey("1", "HAND-PICKED — "+itoa(lenCards(m.stayPowered))+" racks run",
+		lines[4] = m.modeKey("1", "HAND-PICKED — "+itoa(lenCards(m.stayPowered))+" cards run",
 			true) + "   [p] change them   [1] back to auto"
 	}
 	lines = append(lines, stayPlanLines(m.chrome, shown)...)
@@ -277,6 +271,9 @@ func stayPlanLines(c Chrome, pv game.StayPreview) []string {
 		out[0] = "     power 0 kW   nothing runs"
 	}
 	tail := "     cash after " + game.FormatMoney(pv.CashAfter)
+	if pv.Eligible && pv.Curtail == 0 && pv.Mode != game.StayPowerOff {
+		tail += "   hosting " + itoa(pv.HostedSlots) + "/" + itoa(pv.SlotCap) + " slots"
+	}
 	if pv.Clawback > 0 {
 		tail += "   clawback -" + game.FormatMoney(pv.Clawback)
 	}
@@ -289,14 +286,16 @@ func stayPlanLines(c Chrome, pv game.StayPreview) []string {
 func (m Model) subsetBox(b Board) []string {
 	pv := m.run.PreviewStayMode(game.StayAuto, m.stayPick)
 	lines := []string{
-		m.chrome.Title("WHICH RACKS RUN TONIGHT?"),
+		m.chrome.Title("WHICH CARDS RUN TONIGHT?"),
 		m.chrome.Muted(m.chrome.Rule(46)),
 	}
 	rows := m.run.QuoteBoard()
+	picked := 0
 	for i, row := range rows {
 		if row.Owned <= 0 {
 			continue
 		}
+		picked += m.stayPick[i] * row.Slots
 		marker := m.chrome.Marker(i == m.staySel)
 		lines = append(lines, marker+fmt.Sprintf("%-12s run %d of %d",
 			row.Name, m.stayPick[i], row.Owned))
@@ -305,18 +304,20 @@ func (m Model) subsetBox(b Board) []string {
 		lines = append(lines, m.chrome.Muted("Nothing to run."))
 	}
 	lines = append(lines, m.chrome.Muted(m.chrome.Rule(46)))
+	hostLine := "hosting " + itoa(picked) + "/" + itoa(b.SlotsTotal) + " slots"
 	if pv.Valid {
 		lines = append(lines, "meter "+kwStr(pv.PowerKW)+"/"+kwStr(pv.PowerCap)+" kW"+
+			"   "+hostLine+
 			"   hosted +"+game.FormatMoney(pv.Hosted)+
 			"   electric -"+game.FormatMoney(pv.Electric))
 	} else {
 		lines = append(lines, m.chrome.Bad("meter "+kwStr(pv.PowerKW)+"/"+kwStr(pv.PowerCap)+
-			" kW — "+pv.Reason.String()))
+			" kW   "+hostLine+" — "+pv.Reason.String()))
 	}
 	if m.status != "" {
 		lines = append(lines, m.boxStatus())
 	}
-	lines = append(lines, m.chrome.Muted("[up]/[down] pick a rack   [+] and [-] change the count"))
+	lines = append(lines, m.chrome.Muted("[up]/[down] pick a card   [+] and [-] change the count"))
 	return append(lines, m.boxFooter("take this set back to the night plan")...)
 }
 
@@ -547,8 +548,8 @@ func (m Model) helpBox() []string {
 			"                  (in the quantity box a/b/c stay quick 1/5/max)",
 			"e or enter        opens the NIGHT PLAN: 1 auto-power, 2 power off,",
 			"                  3 curtail (when the grid operator is buying),",
-			"                  p pick which racks run by hand",
-			"p in the plan     the powered-card editor: +/- set each rack line",
+			"                  p pick which cards run by hand",
+			"p in the plan     the powered-card editor: +/- set each card line",
 			"[p]ay [s]urrender at a police stop: pay the fine, hand over the",
 			"[c]ontest           named goods, or gamble at the shown odds;",
 			"                  the calendar waits for one of these three",

@@ -68,6 +68,13 @@ type ProductRow struct {
 	Stock   int
 	Owned   int
 	Slots   int
+	// KW100 is the switched-on draw in hundredths of a kilowatt, Host is the
+	// ordinary per-night hosting the card earns when it runs, and Class is
+	// the one-word trading personality: CONsumer, ENTerprise, or MODded.
+	// All three come straight from the content definition.
+	KW100 int64
+	Host  game.Money
+	Class string
 }
 
 // Board is the board screen's read of the engine. Every field is copied from
@@ -337,6 +344,14 @@ func (m Model) snapshot() Board {
 	}
 
 	for _, row := range r.QuoteBoard() {
+		def := content.ProductOf(row.Product)
+		class := "CON"
+		if def.Enterprise {
+			class = "ENT"
+		}
+		if row.Product == content.Mod40948 {
+			class = "MOD"
+		}
 		b.Rows = append(b.Rows, ProductRow{
 			Product: row.Product,
 			Name:    row.Name,
@@ -345,6 +360,9 @@ func (m Model) snapshot() Board {
 			Stock:   row.Stock,
 			Owned:   row.Owned,
 			Slots:   row.Slots,
+			KW100:   def.PoweredKW,
+			Host:    game.Money(def.GrossHostingPerDay),
+			Class:   class,
 		})
 	}
 

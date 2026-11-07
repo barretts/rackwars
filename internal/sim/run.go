@@ -50,15 +50,17 @@ func Play(cfg Config, p Policy) (*game.Run, []game.Step, error) {
 		if _, res := run.Apply(a); !res.OK {
 			break
 		}
-		// Every sim run polices the ledger: money is integer, cash and debt are
-		// never negative, and inventory never exceeds capacity. A run that breaks
-		// one of these is reported instead of being scored.
+		// Every sim run polices the ledger: money is integer, cash and debt
+		// are never negative, and the fleet's slot footprint is sound. A
+		// fleet no longer has to fit anywhere — slots fence hosting, not
+		// owning — so there is no capacity to overrun here. A run that
+		// breaks one of these is reported instead of being scored.
 		if run.State.Debt < 0 || run.State.Cash < 0 {
 			return nil, nil, fmt.Errorf("seed %d day %d: cash %s debt %s after %v",
 				cfg.Seed, run.State.Day, game.FormatMoney(run.State.Cash), game.FormatMoney(run.State.Debt), a)
 		}
-		if used, free := run.SlotsUsed(), run.SlotsAvailable(); used < 0 || free < 0 {
-			return nil, nil, fmt.Errorf("seed %d day %d: %d slots used, %d free", cfg.Seed, run.State.Day, used, free)
+		if used := run.SlotsUsed(); used < 0 {
+			return nil, nil, fmt.Errorf("seed %d day %d: %d slots used", cfg.Seed, run.State.Day, used)
 		}
 	}
 	// Re-derive the step log by replaying the same actions against an identical

@@ -6,7 +6,7 @@ TUI implementation: [TUI-PLAN.md](TUI-PLAN.md). Phase checklist: [TUI-TASKS.md](
 
 Thirty days. Six kinds of GPU. Five markets. One increasingly polite creditor.
 
-The coat is a rack. The neighborhoods are data-center towns. The product is compute hardware. Customs, utility inspectors, and a homeowners' group chat make moving it interesting. You can rent the cards while you hold them, but the money is in buying what everybody hates and selling what everybody suddenly needs.
+The coat fits anything; the site's racks do not. The neighborhoods are data-center towns. The product is compute hardware. Customs, utility inspectors, and a homeowners' group chat make moving it interesting. You can rent the cards while you hold them, but the money is in buying what everybody hates and selling what everybody suddenly needs.
 
 `GPUs ARE OVER`, says the headline. Three days later, everybody needs a chatbot.
 
@@ -26,7 +26,7 @@ Success means a playable trading prototype proves that travel, inventory limits,
 |---|---|
 | A short, finite run | Thirty days, then a forced cash-out and a score |
 | Neighborhood price differences | GPU bids and asks in different data-center towns |
-| A limited coat | A mobile fleet with finite rack slots |
+| A limited coat | A site's host racks, which cap what can run there at once |
 | The loan shark | Shoreline Credit, compounding daily and calling collateral |
 | Cheap product, sudden shortages | Crypto liquidation, export panic, model launches, obsolete flagships |
 | Police encounters | Customs, serial checks, utility inspections, noise complaints |
@@ -44,7 +44,7 @@ The player is a small operator trading a movable fleet, not a hyperscaler buildi
 - Travel consumes one day in the first release. The fleet earns nothing in transit.
 - Staying can earn hosting income, but rent, electricity, and debt interest still count.
 - Every elapsed day compounds outstanding debt by **10%**, including travel days.
-- Rack slots limit what you can carry. Power limits what you can switch on.
+- Rack slots limit what a site can host, not what you can buy or carry. Power limits what you can switch on.
 - Tomorrow's prices can make today's collateral insufficient. Shoreline acts before tomorrow's trading opens.
 - After the day-30 action, sell everything at the displayed closing bids, settle the debt, and score the cash left over.
 
@@ -108,9 +108,9 @@ Use a fast, single-screen, keyboard-driven terminal interface, playable at 80 co
 
 The board shows:
 
-- Day, town, cash, debt, liquidation net worth, heat, occupied slots, and powered kW.
+- Day, town, cash, debt, liquidation net worth, heat, fleet slots (what rides along), the site's host-rack capacity, and powered kW.
 - One headline, its active effect, and any actionable warning about tomorrow.
-- For each product: local **buy ask**, local **sell bid**, available stock, owned quantity, and slots per unit.
+- For each product: local **buy ask**, local **sell bid**, available stock, owned quantity, slots per unit, per-unit powered load, ordinary gross hosting per day, and class (consumer, enterprise, or modded).
 - A compact holding detail: average acquisition price and profit/loss if sold here now, excluding past hosting income.
 - A hosting strip and the net cost of staying or traveling.
 - Buy, Sell, Lender, Travel, and Stay. Borrowing lives inside Lender; there is no second financial dashboard.
@@ -132,7 +132,7 @@ Both sides of a trade must count freight and the day spent waiting. A large appa
 
 ## The coat: six products
 
-One unit is a game-sized, rack-ready bundle. Slots and power are abstractions; a slot is not a literal rack U. Inventory occupies slots whether powered or stored. Only switched-on inventory draws power.
+One unit is a game-sized, rack-ready bundle. Slots and power are abstractions; a slot is not a literal rack U. Buying is limited only by cash and shelf stock: the fleet can outgrow any site, and the whole fleet always travels (freight bills the footprint). Slots are a hosting contract: the cards switched on for the night must occupy no more than the site's slots, and only switched-on inventory draws power.
 
 | Product | Base midpoint | Slots per unit | Powered load | Ordinary gross hosting/day | Trading personality |
 |---|---:|---:|---:|---:|---|
@@ -143,33 +143,33 @@ One unit is a game-sized, rack-ready bundle. Slots and power are abstractions; a
 | H100 | $32,000 | 1 | 0.9 kW | $350 | The boss purchase; allocation spreads, expensive collateral, violent repricing |
 | MI300 | $12,000 | 2 | 1.0 kW | $250 | Alternative supplier; attractive discounts and a clearly priced software risk |
 
-“A $350 3090” means one card inside a four-card sled; the normal sled midpoint is $1,400. Four sleds fill the eight-slot garage for about $5,600 before spreads or shocks. The Merge can make them much cheaper. Use bundle prices consistently in the UI and event copy.
+“A $350 3090” means one card inside a four-card sled; the normal sled midpoint is $1,400. Four sleds already fill the garage's eight host racks for about $5,600 before spreads or shocks — a fifth sled is a legal purchase, it just switches off and rides along. The Merge can make them much cheaper. Use bundle prices consistently in the UI and event copy.
 
 The mystery pallet is an encounter, not a seventh commodity or a core product with undefined capacity. Bees remain an optional joke for later.
 
 ### Capacity and power
 
-- You can carry and resell unpowered hardware. An overloaded breaker never prevents a trade that fits in storage.
-- The hosting screen defaults to the best-paying valid powered subset. The player may change it but should not have to solve a packing puzzle every turn.
-- Show `powered load / available kW` before confirmation. Block an unsafe load; a routine click cannot silently zero the night.
-- Bigger sites improve capacity and power, not the intrinsic price of a card. Fleet capacity is tied to the active lease.
-- Before moving to a smaller site, sell enough inventory to fit. The travel preview gives the limit and blocks an invalid move; there is no hidden storage penalty.
+- You can buy, carry, and resell any amount of unpowered hardware. Neither an overloaded breaker nor an over-subscribed rack ever blocks a trade; slots fence hosting, nothing else.
+- The hosting screen defaults to the best-paying valid powered subset under both the meter and the site's slots. The player may change it but should not have to solve a packing puzzle every turn.
+- Show `powered load / available kW` and `hosted slots / site slots` before confirmation. Block an unsafe load and an over-full rack; a routine click cannot silently zero the night.
+- Bigger sites improve hosting capacity and power, not the intrinsic price of a card. Nothing about the active lease limits what you may own.
+- The fleet always travels whole: arriving at a smaller site is never blocked, though the destination hosts only its own racks' worth, and freight still bills `route fee + $50 × fleet slots`. The travel preview shows the fleet footprint and the destination's host capacity; there is no hidden storage penalty.
 
 ## The towns
 
 Start with three markets; expand to five after the trading prototype works. The garage is the home market, not an extra town layered underneath every destination.
 
-| Market | Storage / power | Daily lease | Why go there? | What bites? |
+| Market | Host racks / power | Daily lease | Why go there? | What bites? |
 |---|---|---:|---|---|
 | The garage | 8 slots / 2 kW | $0 | Free base; ordinary consumer-card trading | Denise's group chat; little hosting capacity |
 | Ashburn | 16 slots / 12 kW | $800 | Enterprise buyers, H100 allocations, premium contracts | High fixed costs and serial checks |
 | West Texas | 24 slots / 10 kW | $250 | Crypto liquidation and bulk used inventory | Curtailment; more slots than dependable power |
 | The Dalles | 16 slots / 8 kW | $350 | Cheap electricity and steady older enterprise stock | Drought reduces available power for a stated window |
-| Huaqiangbei | 8 slots / no hosting | $100 | Modded cards, low asks, risky arbitrage | Customs on departure; scarce enterprise buyers |
+| Huaqiangbei | No hosting site | $100 | Modded cards, low asks, risky arbitrage | Customs on departure; scarce enterprise buyers |
 
-All routes initially take **one day**. Freight is `a route fee + $50 × occupied slots`, shown before confirming. Start route fees at $250 for domestic travel and $1,000 for any route involving Huaqiangbei. An empty departure from the garage costs $250, not thousands of dollars before the player can trade.
+All routes initially take **one day**. Freight is `a route fee + $50 × fleet slots` — the footprint that rides the truck, powered or not — shown before confirming. Start route fees at $250 for domestic travel and $1,000 for any route involving Huaqiangbei. An empty departure from the garage costs $250, not thousands of dollars before the player can trade.
 
-Travel forecasts show the next destination's lease, capacity, power condition, current known market information, freight cost, and estimated interest. Arriving does not automatically charge another day's rent.
+Travel forecasts show the next destination's lease, host-rack capacity, power condition, current known market information, freight cost, and estimated interest. Arriving does not automatically charge another day's rent.
 
 Two-day international freight, Memphis, and a purchased turbine are expansion candidates. They do not belong in the first playable economy.
 
@@ -306,7 +306,7 @@ Illustrative local board; the “Buy” column is always above “Sell.”
 ```text
 DAY 25 / 30       WEST TEXAS          HEAT 30 / 100
 CASH $14,000      DEBT $60,000        LIQUIDATION NET $34,000
-SLOTS 2 / 24      POWERED 1.8 / 10 kW
+FLEET 4 slots     HOSTS 2 / 24      POWERED 1.8 / 10 kW
 
 HEADLINE: A small model out of Hangzhou. A large rumor.
 TOMORROW: Enterprise resale and hosting rates may fall sharply.
@@ -399,7 +399,7 @@ The implementer should cover the state transitions where money, time, and owners
 - Borrowing never exceeds the recalculated ceiling. A borrow/buy/resell loop cannot create net worth. Repayment immediately changes the interest preview.
 - Interest compounds once per elapsed day. If nothing changes the balance, the untouched $20,000 note becomes $22,000 after the first day and $24,200 after the second.
 - The worked two-H100 shock produces two forced sales and $28,000 debt at the stated check. Test partial cash cures, whole-unit surplus returned to cash, no remaining collateral, and the shrinking credit ceiling.
-- Stored GPUs count toward slots but not power. Moving to an undersized lease is blocked. Transit earns zero hosting revenue and does not also charge a site lease.
+- Stored GPUs count toward the fleet's freight footprint but not toward power; the fleet always travels whole and no site blocks its arrival. Only the hosted subset must fit the site's slots and meter. Transit earns zero hosting revenue and does not also charge a site lease.
 - A disabled or ineligible card cannot earn a featured payout. Operating receipts, costs, event losses, and debt charges reconcile to the displayed receipt.
 - A saved run resumed before a commitment produces the same result as uninterrupted play with the same actions. Save version mismatches fail clearly rather than silently resetting debt or stock.
 - Final cash-out equals closing cash plus closing bids times owned quantities minus debt, with any deficiency shown. The ending tier uses that result.

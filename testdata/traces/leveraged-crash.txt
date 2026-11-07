@@ -1,18 +1,36 @@
-seed 1 day 8 garage cash $0 debt $30,193
+seed 1 day 8 garage cash $0 debt $32,490
 cast 3090sled,4090,h100 markets garage,ashburn,westtexas rules prototype
 d1  garage     borrow $10,000         cash $40,000 debt $30,000 net $10,000 slots 0
 d1  garage     buy h100 x1            cash $15,008 debt $30,000 net $5,456 slots 1 cost $24,992
 d1  garage     borrow $10,224         cash $25,232 debt $40,224 net $5,456 slots 1
-d1  garage     buy 4090 x7            cash $15,663 debt $40,224 net $3,706 slots 8 cost $9,569
-d1  garage     borrow $3,909          cash $19,572 debt $44,133 net $3,706 slots 8
-d2  garage     stay                   cash $19,572 debt $48,547 net $13,751 slots 8 interest $4,414
-d2  garage     borrow $2,816          cash $22,388 debt $51,363 net $13,751 slots 8
-d3  garage     stay                   cash $18,569 debt $52,681 net $11,251 slots 8 interest $5,137
-d4  garage     stay                   cash $11,331 debt $50,712 net $2,044 slots 8 interest $5,269
-d5  garage     stay                   cash $8,528 debt $52,981 net $1,510 slots 8 interest $5,072
-d6  garage     stay                   cash $6,953 debt $56,705 net $3,658 slots 8 interest $5,299
-d7  garage     stay                   cash $0 debt $34,399 net -$14,554 slots 7 interest $5,671 forced 1
-d7  garage     borrow $5,523          cash $5,523 debt $39,922 net -$14,554 slots 7
-d7  garage     buy 4090 x1            cash $2,058 debt $39,922 net -$15,184 slots 8 cost $3,465
-d8  garage     stay                   cash $0 debt $30,193 net -$30,193 slots 0 interest $3,993 forced 8
-over: repossessed cash-out -$30,193 rank Shoreline's new subsidiary
+d1  garage     buy 4090 x16           cash $3,360 debt $40,224 net $1,456 slots 17 cost $21,872
+d1  garage     borrow $8,936          cash $12,296 debt $49,160 net $1,456 slots 17
+d1  garage     buy 3090sled x7        cash $4 debt $49,160 net -$784 slots 31 cost $12,292
+d1  garage     borrow $5,026          cash $5,030 debt $54,186 net -$784 slots 31
+d1  garage     buy 3090sled x2        cash $1,518 debt $54,186 net -$1,424 slots 35 cost $3,512
+d1  garage     borrow $1,436          cash $2,954 debt $55,622 net -$1,424 slots 35
+d1  garage     buy 3090sled x1        cash $1,198 debt $55,622 net -$1,744 slots 37 cost $1,756
+d2  garage     stay                   cash $1,198 debt $61,185 net $10,435 slots 37 interest $5,563
+d2  garage     borrow $4,026          cash $5,224 debt $65,211 net $10,435 slots 37
+d2  garage     buy 4090 x1            cash $2,590 debt $65,211 net $9,955 slots 38 cost $2,634
+d2  garage     borrow $1,077          cash $3,667 debt $66,288 net $9,955 slots 38
+d2  garage     buy 4090 x1            cash $1,033 debt $66,288 net $9,475 slots 39 cost $2,634
+d2  garage     borrow $1,077          cash $2,110 debt $67,365 net $9,475 slots 39
+d2  garage     buy 3090sled x2        cash $76 debt $67,365 net $9,103 slots 43 cost $2,034
+d3  garage     stay                   cash $0 debt $40,906 net -$3,076 slots 42 interest $6,737 forced 1
+d3  garage     borrow $8,009          cash $8,009 debt $48,915 net -$3,076 slots 42
+d3  garage     buy 4090 x3            cash $1,592 debt $48,915 net -$4,246 slots 45 cost $6,417
+d3  garage     borrow $2,623          cash $4,215 debt $51,538 net -$4,246 slots 45
+d3  garage     buy 4090 x1            cash $2,076 debt $51,538 net -$4,636 slots 46 cost $2,139
+d3  garage     borrow $875            cash $2,951 debt $52,413 net -$4,636 slots 46
+d3  garage     buy 4090 x1            cash $812 debt $52,413 net -$5,026 slots 47 cost $2,139
+d3  garage     borrow $874            cash $1,686 debt $53,287 net -$5,026 slots 47
+d3  garage     buy 3090sled x2        cash $392 debt $53,287 net -$5,262 slots 51 cost $1,294
+d4  garage     stay                   cash $0 debt $48,589 net -$9,493 slots 46 interest $5,329 forced 5
+d4  garage     borrow $959            cash $959 debt $49,548 net -$9,493 slots 46
+d4  garage     buy 3090sled x2        cash $189 debt $49,548 net -$9,633 slots 50 cost $770
+d5  garage     stay                   cash $0 debt $30,927 net -$28,912 slots 10 interest $4,955 forced 29
+d6  garage     stay                   cash $0 debt $34,020 net -$25,515 slots 10 interest $3,093
+d7  garage     stay                   cash $0 debt $34,940 net -$25,012 slots 8 interest $3,402 forced 1
+d8  garage     stay                   cash $0 debt $32,490 net -$32,490 slots 0 interest $3,494 forced 4
+over: repossessed cash-out -$32,490 rank Shoreline's new subsidiary

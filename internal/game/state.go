@@ -280,19 +280,16 @@ func (r *Run) SeenDayOf(m content.MarketID) int {
 	return r.State.SeenDay[mi]
 }
 
-// SlotsUsed counts occupied storage slots. Stored and powered hardware both
-// occupy slots; only powered hardware draws kilowatts.
+// SlotsUsed is the fleet's slot footprint: every owned card's slots, whether
+// hosted tonight or riding in the coat. It is what freight bills, and it is
+// deliberately NOT what a site must contain — only the hosted subset does,
+// and buying or travelling never runs out of slots.
 func (r *Run) SlotsUsed() int {
 	used := 0
 	for i, p := range r.cfg.Products {
 		used += r.State.Owned[i] * content.ProductOf(p).SlotsPerUnit
 	}
 	return used
-}
-
-// SlotsAvailable is the free capacity of the active lease.
-func (r *Run) SlotsAvailable() int {
-	return content.MarketOf(r.State.Market).Slots - r.SlotsUsed()
 }
 
 // CollateralValue is what the current town would pay for everything held.
