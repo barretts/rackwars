@@ -1,5 +1,7 @@
 # RACK WARS
 
+![RACK WARS — neon pink and cyan lettering over a Miami skyline, framed by GPU racks](assets/rack-wars-banner-miami.png)
+
 A GPU trading game for the terminal: buy accelerators cheap, find electricity,
 pay Shoreline Credit's interest, and finish the 30-day closing auction solvent.
 
