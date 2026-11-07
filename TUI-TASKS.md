@@ -858,6 +858,22 @@ ellipsis. `go vet`, `go test ./... -count=1` and
 `go test -race -timeout 300s ./... -count=1` all green.
 Gate: incomplete - the same open gaps as Phase 5 (ConPTY harness only; macOS
 and human-play rows open).
+
+Follow-up (bddb0d6, release v0.1.0-phase5.3): the first GitHub CI run was
+windows-green, macOS-red. Two causes, both new territory, no rule-change
+regressions. (1) Fixed here: os.Stat through a replaced directory answers
+ERROR_PATH_NOT_FOUND (not-exist) on Windows but ENOTDIR on darwin, so an
+unwritable save folder hit a dead-end branch on macOS; ENOTDIR now falls
+through to the tmp write and every platform gives the same retry sentence.
+(2) OPEN - owner parked it: the four scripted-keyboard TUI harness tests
+render desynced frames on the macOS runner only (Windows job green). The
+frames show terminal autowrap where the view did not wrap, i.e. the fake
+screen and the renderer disagree about size or cursor state on darwin.
+Needs macOS hardware to debug; it is harness behavior, not engine rules,
+and nothing in this release's Windows or Linux paths depends on it. The
+test's old "Retry" assertion also passed only by accident (the temp-dir
+path inside the message carries the test name, whose "HowToRetry" supplied
+the substring); it now asserts the real contract, "to try again".
 ```
 
 Optional content remains outside the base-release gates.
