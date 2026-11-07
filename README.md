@@ -3,6 +3,8 @@
 A GPU trading game for the terminal: buy accelerators cheap, find electricity,
 pay Shoreline Credit's interest, and finish the 30-day closing auction solvent.
 
+<img width="1065" height="476" alt="rackwars" src="https://github.com/user-attachments/assets/120debc2-f790-4622-9b4d-b81390ea2362" />
+
 **Current status: playable trading prototype with persistence in development.**
 Buy, sell, borrow, repay, travel, and close a 30-day run. Saves, Continue,
 backup recovery, autosave, and trace export are wired into the terminal program.
