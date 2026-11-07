@@ -108,3 +108,7 @@ computes a price, an interest charge, or a limit.
 Tests drive the real Bubble Tea program: raw keyboard bytes through the input
 reader, the real renderer, and an assertion layer that rebuilds the visible
 screen grid, because the renderer only repaints changed cells.
+
+## License
+
+[MIT](LICENSE). Copyright (c) 2026 Barrett Sonntag.
